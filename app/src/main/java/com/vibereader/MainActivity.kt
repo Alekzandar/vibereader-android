@@ -9,10 +9,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.vibereader.data.db.AppDatabase
-import com.vibereader.ui.SessionScreen
 import com.vibereader.ui.SessionViewModel
 import com.vibereader.ui.SessionViewModelFactory
-import com.vibereader.ui.theme.VibeReaderTheme // Make sure this theme name is correct
+import com.vibereader.ui.theme.VibeReaderTheme
+
+// ADD THIS LINE
+import com.vibereader.ui.MainScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -23,17 +25,17 @@ class MainActivity : ComponentActivity() {
     private val viewModel: SessionViewModel by viewModels {
         SessionViewModelFactory(db)
     }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            VibeReaderTheme { // Your app's theme
+            // FIX: Changed this back to VibeReaderTheme
+            VibeReaderTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Show the main screen
-                    SessionScreen(viewModel = viewModel)
+                    // Show the new MainScreen, which handles navigation
+                    MainScreen(viewModel = viewModel)
                 }
             }
         }

@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.vibereader.data.db.Word
+import com.vibereader.data.db.Quote
 
 class SessionViewModel(
     private val db: AppDatabase
@@ -34,6 +36,21 @@ class SessionViewModel(
             initialValue = emptyList()
         )
 
+    // Observes all saved words from the database.
+    val allWords: StateFlow<List<Word>> = db.vibeReaderDao().getAllWords()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    // Observes all saved quotes from the database.
+    val allQuotes: StateFlow<List<Quote>> = db.vibeReaderDao().getAllQuotes()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
     fun startSession(context: Context, bookTitle: String) {
         viewModelScope.launch {
             // 1. Create a new session in the database
