@@ -11,9 +11,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
-// NOTE: We no longer need lifecycleScope, firstOrNull, or launch
 import androidx.media.app.NotificationCompat.MediaStyle
-// NOTE: We no longer need AppDatabase
 import com.vibereader.ui.SpeechCaptureActivity
 
 class ReadingSessionService : LifecycleService() {
@@ -21,8 +19,6 @@ class ReadingSessionService : LifecycleService() {
     private var mediaSession: MediaSessionCompat? = null
     private lateinit var notificationManager: NotificationManager
 
-    // --- UPDATED ---
-    // We will store the ID and title here, passed from the ViewModel
     private var activeSessionId: Long = -1L
     private var currentBookTitle: String = "No Session"
 
@@ -41,84 +37,76 @@ class ReadingSessionService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START_SESSION -> {
-                // --- UPDATED: Receive and store the ID and title ---
                 currentBookTitle = intent.getStringExtra(EXTRA_BOOK_TITLE) ?: "Reading"
                 activeSessionId = intent.getLongExtra(EXTRA_SESSION_ID, -1L)
 
                 Log.d("Service", "Starting session $activeSessionId for: $currentBookTitle")
 
-                // If the ID is invalid, stop immediately
                 if (activeSessionId == -1L) {
                     Log.e("Service", "Invalid session ID. Stopping.")
                     stopService()
                     return START_NOT_STICKY
                 }
 
+                // We call buildNotification() here, AFTER activeSessionId is set
                 startForeground(NOTIFICATION_ID, buildNotification())
             }
             ACTION_STOP_SESSION -> {
                 Log.d("Service", "Stopping session")
                 stopService()
             }
-            ACTION_DEFINE_WORD -> {
-                Log.d("Service", "Define Word Tapped!")
-                launchSpeechCapture(SpeechCaptureActivity.CaptureMode.DEFINE_WORD)
-            }
-            ACTION_SAVE_QUOTE -> {
-                Log.d("Service", "Save Quote Tapped!")
-                launchSpeechCapture(SpeechCaptureActivity.CaptureMode.SAVE_QUOTE)
-            }
+            // --- REMOVED ---
+            // We no longer need to handle DEFINE_WORD or SAVE_QUOTE here.
+            // The notification PendingIntents will do it directly.
         }
         return START_STICKY
     }
 
-    // --- UPDATED: This function is now much simpler ---
-    private fun launchSpeechCapture(mode: SpeechCaptureActivity.CaptureMode) {
-        // We no longer need to query the database. We just check our variable.
-        if (activeSessionId == -1L) {
-            Log.e("Service", "Button tapped, but no active session ID.")
-            Toast.makeText(applicationContext, "Error: No Active Session", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val intent = Intent(applicationContext, SpeechCaptureActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(SpeechCaptureActivity.EXTRA_SESSION_ID, activeSessionId) // Use the stored ID
-            putExtra(SpeechCaptureActivity.EXTRA_CAPTURE_MODE, mode)
-        }
-        startActivity(intent)
-    }
+    // --- REMOVED ---
+    // We no longer need the launchSpeechCapture function.
 
     private fun buildNotification(): android.app.Notification {
-        val defineWordIntent = Intent(this, ReadingSessionService::class.java).apply {
-            action = ACTION_DEFINE_WORD
+
+        // --- THIS IS THE KEY FIX ---
+        // We create PendingIntents that launch the Activity directly.
+
+        // Create the "Define Word" intent
+        val defineWordIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(SpeechCaptureActivity.EXTRA_SESSION_ID, activeSessionId)
+            putExtra(SpeechCaptureActivity.EXTRA_CAPTURE_MODE, SpeechCaptureActivity.CaptureMode.DEFINE_WORD)
         }
-        val defineWordPendingIntent = PendingIntent.getService(
+        // Note: We use a different request code for each PendingIntent
+        val defineWordPendingIntent = PendingIntent.getActivity(
             this,
             REQUEST_CODE_DEFINE,
             defineWordIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT // UPDATE_CURRENT is critical
         )
         val defineAction = NotificationCompat.Action(
-            R.drawable.ic_define_word, // Your icon
+            R.drawable.ic_define_word,
             "Define Word",
             defineWordPendingIntent
         )
 
-        val saveQuoteIntent = Intent(this, ReadingSessionService::class.java).apply {
-            action = ACTION_SAVE_QUOTE
+        // Create the "Save Quote" intent
+        val saveQuoteIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(SpeechCaptureActivity.EXTRA_SESSION_ID, activeSessionId)
+            putExtra(SpeechCaptureActivity.EXTRA_CAPTURE_MODE, SpeechCaptureActivity.CaptureMode.SAVE_QUOTE)
         }
-        val saveQuotePendingIntent = PendingIntent.getService(
+        val saveQuotePendingIntent = PendingIntent.getActivity(
             this,
             REQUEST_CODE_SAVE,
             saveQuoteIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val saveQuoteAction = NotificationCompat.Action(
-            R.drawable.ic_save_quote, // Your icon
+            R.drawable.ic_save_quote,
             "Save Quote",
             saveQuotePendingIntent
         )
+        // --- END OF FIX ---
 
         val stopIntent = Intent(this, ReadingSessionService::class.java).apply {
             action = ACTION_STOP_SESSION
@@ -179,11 +167,10 @@ class ReadingSessionService : LifecycleService() {
         const val NOTIFICATION_ID = 1
         const val ACTION_START_SESSION = "com.vibereader.ACTION_START_SESSION"
         const val ACTION_STOP_SESSION = "com.vibereader.ACTION_STOP_SESSION"
-        const val ACTION_DEFINE_WORD = "com.vibereader.ACTION_DEFINE_WORD"
-        const val ACTION_SAVE_QUOTE = "com.vibereader.ACTION_SAVE_QUOTE"
-        const val EXTRA_BOOK_TITLE = "com.vibereader.EXTRA_BOOK_TITLE"
 
-        // --- ADD THIS LINE ---
+        // We no longer need the other actions
+
+        const val EXTRA_BOOK_TITLE = "com.vibereader.EXTRA_BOOK_TITLE"
         const val EXTRA_SESSION_ID = "com.vibereader.EXTRA_SESSION_ID"
 
         const val REQUEST_CODE_DEFINE = 101
