@@ -8,24 +8,22 @@ import android.content.Intent
 import android.os.Build
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
-import androidx.lifecycle.lifecycleScope
+// NOTE: We no longer need lifecycleScope, firstOrNull, or launch
 import androidx.media.app.NotificationCompat.MediaStyle
-import com.vibereader.data.db.AppDatabase
+// NOTE: We no longer need AppDatabase
 import com.vibereader.ui.SpeechCaptureActivity
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
-import android.widget.Toast
 
 class ReadingSessionService : LifecycleService() {
 
     private var mediaSession: MediaSessionCompat? = null
     private lateinit var notificationManager: NotificationManager
 
-    // ADDED: Get a reference to the database
-    private val db by lazy { AppDatabase.getDatabase(this) }
-
+    // --- UPDATED ---
+    // We will store the ID and title here, passed from the ViewModel
+    private var activeSessionId: Long = -1L
     private var currentBookTitle: String = "No Session"
 
     override fun onCreate() {
@@ -43,49 +41,52 @@ class ReadingSessionService : LifecycleService() {
 
         when (intent?.action) {
             ACTION_START_SESSION -> {
+                // --- UPDATED: Receive and store the ID and title ---
                 currentBookTitle = intent.getStringExtra(EXTRA_BOOK_TITLE) ?: "Reading"
-                Log.d("Service", "Starting session for: $currentBookTitle")
+                activeSessionId = intent.getLongExtra(EXTRA_SESSION_ID, -1L)
+
+                Log.d("Service", "Starting session $activeSessionId for: $currentBookTitle")
+
+                // If the ID is invalid, stop immediately
+                if (activeSessionId == -1L) {
+                    Log.e("Service", "Invalid session ID. Stopping.")
+                    stopService()
+                    return START_NOT_STICKY
+                }
+
                 startForeground(NOTIFICATION_ID, buildNotification())
-                // We no longer need to insert to Room here, ViewModel does it
             }
             ACTION_STOP_SESSION -> {
                 Log.d("Service", "Stopping session")
-                // We no longer need to update Room here, ViewModel does it
                 stopService()
             }
             ACTION_DEFINE_WORD -> {
                 Log.d("Service", "Define Word Tapped!")
-                // TODO: Launch SpeechCaptureActivity with "DEFINE" mode
-                Toast.makeText(this, "Define Word: Not Implemented", Toast.LENGTH_SHORT).show()
+                launchSpeechCapture(SpeechCaptureActivity.CaptureMode.DEFINE_WORD)
             }
             ACTION_SAVE_QUOTE -> {
                 Log.d("Service", "Save Quote Tapped!")
-                // UPDATED: Launch our new activity
-                launchSpeechCapture()
+                launchSpeechCapture(SpeechCaptureActivity.CaptureMode.SAVE_QUOTE)
             }
         }
         return START_STICKY
     }
 
-    // ADDED: New function to launch the capture activity
-    private fun launchSpeechCapture() {
-        // We must find the active session ID from the database
-        lifecycleScope.launch {
-            val activeSession = db.vibeReaderDao().getActiveSession().firstOrNull()
-            if (activeSession == null) {
-                Log.e("Service", "Save Quote tapped, but no active session found in DB.")
-                Toast.makeText(applicationContext, "Error: No Active Session", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
-            // Launch the transparent activity over the lock screen
-            val intent = Intent(applicationContext, SpeechCaptureActivity::class.java).apply {
-                // We MUST add this flag to start an Activity from a Service
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                putExtra(SpeechCaptureActivity.EXTRA_SESSION_ID, activeSession.sessionId)
-            }
-            startActivity(intent)
+    // --- UPDATED: This function is now much simpler ---
+    private fun launchSpeechCapture(mode: SpeechCaptureActivity.CaptureMode) {
+        // We no longer need to query the database. We just check our variable.
+        if (activeSessionId == -1L) {
+            Log.e("Service", "Button tapped, but no active session ID.")
+            Toast.makeText(applicationContext, "Error: No Active Session", Toast.LENGTH_SHORT).show()
+            return
         }
+
+        val intent = Intent(applicationContext, SpeechCaptureActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(SpeechCaptureActivity.EXTRA_SESSION_ID, activeSessionId) // Use the stored ID
+            putExtra(SpeechCaptureActivity.EXTRA_CAPTURE_MODE, mode)
+        }
+        startActivity(intent)
     }
 
     private fun buildNotification(): android.app.Notification {
@@ -99,7 +100,7 @@ class ReadingSessionService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val defineAction = NotificationCompat.Action(
-            R.drawable.ic_define_word,
+            R.drawable.ic_define_word, // Your icon
             "Define Word",
             defineWordPendingIntent
         )
@@ -114,7 +115,7 @@ class ReadingSessionService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val saveQuoteAction = NotificationCompat.Action(
-            R.drawable.ic_save_quote,
+            R.drawable.ic_save_quote, // Your icon
             "Save Quote",
             saveQuotePendingIntent
         )
@@ -181,6 +182,10 @@ class ReadingSessionService : LifecycleService() {
         const val ACTION_DEFINE_WORD = "com.vibereader.ACTION_DEFINE_WORD"
         const val ACTION_SAVE_QUOTE = "com.vibereader.ACTION_SAVE_QUOTE"
         const val EXTRA_BOOK_TITLE = "com.vibereader.EXTRA_BOOK_TITLE"
+
+        // --- ADD THIS LINE ---
+        const val EXTRA_SESSION_ID = "com.vibereader.EXTRA_SESSION_ID"
+
         const val REQUEST_CODE_DEFINE = 101
         const val REQUEST_CODE_SAVE = 102
         const val REQUEST_CODE_STOP = 103

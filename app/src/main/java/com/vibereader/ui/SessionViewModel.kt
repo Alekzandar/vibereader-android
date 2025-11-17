@@ -59,12 +59,15 @@ class SessionViewModel(
                 startTime = System.currentTimeMillis(),
                 status = "active"
             )
-            db.vibeReaderDao().insertSession(newSession)
+            // 2. Get the new ID back from the insert operation
+            val newSessionId = db.vibeReaderDao().insertSession(newSession)
 
-            // 2. Start the ForegroundService
+            // 3. Start the ForegroundService and PASS THE ID
             val intent = Intent(context, ReadingSessionService::class.java).apply {
                 action = ReadingSessionService.ACTION_START_SESSION
                 putExtra(ReadingSessionService.EXTRA_BOOK_TITLE, bookTitle)
+
+                putExtra(ReadingSessionService.EXTRA_SESSION_ID, newSessionId)
             }
             context.startForegroundService(intent)
         }
