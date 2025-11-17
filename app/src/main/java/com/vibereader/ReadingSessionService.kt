@@ -99,7 +99,7 @@ class ReadingSessionService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val defineAction = NotificationCompat.Action(
-            0, // TODO: Add an icon here
+            R.drawable.ic_define_word,
             "Define Word",
             defineWordPendingIntent
         )
@@ -114,7 +114,7 @@ class ReadingSessionService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val saveQuoteAction = NotificationCompat.Action(
-            0, // TODO: Add an icon here
+            R.drawable.ic_save_quote,
             "Save Quote",
             saveQuotePendingIntent
         )
