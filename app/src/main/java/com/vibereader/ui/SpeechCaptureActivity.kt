@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.vibereader.data.db.AppDatabase
 import com.vibereader.data.db.Quote
+import com.vibereader.data.db.Word
+import com.vibereader.data.network.RetrofitClient
 import com.vibereader.ui.theme.VibeReaderTheme
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -32,32 +34,36 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var speechRecognizer: SpeechRecognizer
     private lateinit var tts: TextToSpeech
     private var activeSessionId: Long = -1
+    private var captureMode: CaptureMode = CaptureMode.SAVE_QUOTE // Default
 
     // State for the UI
     private val uiState = mutableStateOf(CaptureState.LISTENING)
     private val spokenText = mutableStateOf("")
+    private val definitionText = mutableStateOf("") // For define mode
 
-    private enum class CaptureState { LISTENING, VERIFYING, SAVING, ERROR }
+    private enum class CaptureState { LISTENING, VERIFYING, SAVING, DEFINING, ERROR }
+    enum class CaptureMode { SAVE_QUOTE, DEFINE_WORD }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Get the active session ID passed from the service
+        // --- Get Intent Extras ---
         activeSessionId = intent.getLongExtra(EXTRA_SESSION_ID, -1)
+        captureMode = intent.getSerializableExtra(EXTRA_CAPTURE_MODE) as? CaptureMode ?: CaptureMode.SAVE_QUOTE
+
         if (activeSessionId == -1L) {
             Log.e("SpeechCapture", "No active session ID provided. Closing.")
             finish()
             return
         }
 
-        // Initialize Speech and TTS
+        // --- Initialize Speech and TTS ---
         tts = TextToSpeech(this, this)
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer.setRecognitionListener(speechRecognitionListener)
 
         setContent {
             VibeReaderTheme {
-                // Full-screen, transparent UI
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -69,14 +75,14 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // Start listening as soon as the activity launches
-        startListening()
+        startListening() // Start listening on launch
     }
 
     @Composable
     private fun CaptureScreen() {
         val state by remember { uiState }
-        val text by remember { spokenText }
+        val sText by remember { spokenText }
+        val dText by remember { definitionText }
 
         Column(
             modifier = Modifier
@@ -85,24 +91,20 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             when (state) {
-                CaptureState.LISTENING -> {
+                CaptureState.LISTENING, CaptureState.SAVING -> {
                     CircularProgressIndicator(color = Color.White)
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        "Listening...",
+                        if (state == CaptureState.LISTENING) "Listening..." else "Saving...",
                         style = MaterialTheme.typography.headlineSmall,
                         color = Color.White
                     )
                 }
-                CaptureState.VERIFYING -> {
-                    Text(
-                        "I heard:",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White
-                    )
+                CaptureState.VERIFYING -> { // Quote Mode
+                    Text("I heard:", style = MaterialTheme.typography.titleMedium, color = Color.White)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "\"$text\"",
+                        "\"$sText\"",
                         style = MaterialTheme.typography.headlineSmall,
                         color = Color.White,
                         textAlign = TextAlign.Center
@@ -112,22 +114,26 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        Button(onClick = { startListening() }) {
-                            Text("Retry")
-                        }
-                        Button(onClick = { saveQuote() }) {
-                            Text("Confirm")
-                        }
+                        Button(onClick = { startListening() }) { Text("Retry") }
+                        Button(onClick = { saveQuote() }) { Text("Confirm") }
                     }
                 }
-                CaptureState.SAVING -> {
-                    CircularProgressIndicator(color = Color.White)
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "Saving...",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White
-                    )
+                CaptureState.DEFINING -> { // Define Mode
+                    if (dText.isEmpty()) {
+                        // API call is in progress
+                        CircularProgressIndicator(color = Color.White)
+                        Spacer(Modifier.height(16.dp))
+                        Text("Looking up '$sText'...", style = MaterialTheme.typography.headlineSmall, color = Color.White)
+                    } else {
+                        // API call is complete
+                        Text(sText, style = MaterialTheme.typography.headlineSmall, color = Color.White)
+                        Spacer(Modifier.height(8.dp))
+                        Text(dText, style = MaterialTheme.typography.bodyLarge, color = Color.White, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(24.dp))
+                        Button(onClick = { finish() }) {
+                            Text("Done")
+                        }
+                    }
                 }
                 CaptureState.ERROR -> {
                     Text(
@@ -135,6 +141,10 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         style = MaterialTheme.typography.headlineSmall,
                         color = MaterialTheme.colorScheme.error
                     )
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = { finish() }) {
+                        Text("Close")
+                    }
                 }
             }
         }
@@ -149,6 +159,53 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         speechRecognizer.startListening(intent)
     }
 
+    // --- New Function: Handle Speech Result ---
+    private fun handleSpeechResult(text: String) {
+        spokenText.value = text
+        when (captureMode) {
+            CaptureMode.SAVE_QUOTE -> {
+                uiState.value = CaptureState.VERIFYING
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+            }
+            CaptureMode.DEFINE_WORD -> {
+                uiState.value = CaptureState.DEFINING
+                // Launch coroutine to call API
+                lifecycleScope.launch {
+                    try {
+                        val response = RetrofitClient.instance.getDefinition(text)
+                        // Get first definition from the API response
+                        val firstMeaning = response.firstOrNull()?.meanings?.firstOrNull()
+                        val firstDefinition = firstMeaning?.definitions?.firstOrNull()?.definition ?: "No definition found."
+
+                        definitionText.value = "(${firstMeaning?.partOfSpeech}) $firstDefinition"
+
+                        // Save the word to the database
+                        saveWord(text, definitionText.value)
+
+                    } catch (e: Exception) {
+                        Log.e("SpeechCapture", "API Error: ${e.message}")
+                        definitionText.value = "Error: Could not find definition."
+                    }
+                }
+            }
+        }
+    }
+
+    // --- New Function: Save Word ---
+    private fun saveWord(term: String, definition: String) {
+        lifecycleScope.launch {
+            val word = Word(
+                sessionId = activeSessionId,
+                term = term,
+                definition = definition,
+                timestamp = System.currentTimeMillis()
+            )
+            AppDatabase.getDatabase(applicationContext).vibeReaderDao().insertWord(word)
+            Log.d("SpeechCapture", "Word saved: $term")
+        }
+    }
+
+    // --- Updated Function: Save Quote ---
     private fun saveQuote() {
         uiState.value = CaptureState.SAVING
         lifecycleScope.launch {
@@ -157,10 +214,7 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 content = spokenText.value,
                 timestamp = System.currentTimeMillis()
             )
-            // Get the database and save the quote
             AppDatabase.getDatabase(applicationContext).vibeReaderDao().insertQuote(quote)
-
-            // Show success and close
             Toast.makeText(applicationContext, "Quote Saved!", Toast.LENGTH_SHORT).show()
             finish()
         }
@@ -171,10 +225,8 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         override fun onResults(results: Bundle?) {
             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             if (!matches.isNullOrEmpty()) {
-                spokenText.value = matches[0]
-                uiState.value = CaptureState.VERIFYING
-                // Read the quote back for verification
-                tts.speak(spokenText.value, TextToSpeech.QUEUE_FLUSH, null, null)
+                // Handle the result in our new function
+                handleSpeechResult(matches[0])
             } else {
                 uiState.value = CaptureState.ERROR
             }
@@ -186,10 +238,9 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {}
-
-        // --- ADD THIS MISSING METHOD ---
         override fun onEvent(eventType: Int, params: Bundle?) {}
     }
+
     // --- TextToSpeech Listener ---
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
@@ -208,5 +259,6 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     companion object {
         const val EXTRA_SESSION_ID = "com.vibereader.EXTRA_SESSION_ID"
+        const val EXTRA_CAPTURE_MODE = "com.vibereader.EXTRA_CAPTURE_MODE"
     }
 }
