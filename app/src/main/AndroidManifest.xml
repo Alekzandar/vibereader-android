@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- UPDATED: Swapped Media Playback for Data Sync to allow standard notifications -->
+    <!-- REQUIRED: Permission for standard background processing -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -19,6 +19,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.VibeReader"
         tools:targetApi="31">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -30,7 +31,7 @@
             </intent-filter>
         </activity>
 
-        <!-- UPDATED: Changed type to dataSync to match the non-media Service code -->
+        <!-- UPDATED: Type is dataSync for standard notification -->
         <service
             android:name=".ReadingSessionService"
             android:exported="false"
@@ -45,5 +46,4 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
     </application>
-
 </manifest>

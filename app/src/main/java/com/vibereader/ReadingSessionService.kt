@@ -21,7 +21,8 @@ class ReadingSessionService : LifecycleService() {
     private lateinit var dao: VibeReaderDao
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val CHANNEL_ID = "vibe_reader_notifications"
+    // Changed ID to force the OS to refresh channel settings
+    private val CHANNEL_ID = "vibe_reader_service_v2"
     private val NOTIFICATION_ID = 1001
 
     companion object {
@@ -52,7 +53,7 @@ class ReadingSessionService : LifecycleService() {
     private fun showNotification(bookName: String) {
         createNotificationChannel()
 
-        // Intents for capture actions
+        // Intents
         val defineIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
             action = ACTION_DEFINE
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -71,21 +72,20 @@ class ReadingSessionService : LifecycleService() {
         val openAppIntent = Intent(this, MainActivity::class.java)
         val openAppPendingIntent = PendingIntent.getActivity(this, 0, openAppIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        // STANDARD NOTIFICATION (No MediaStyle)
-        // Uses standard icons to avoid "Unresolved reference" errors
+        // STANDARD NOTIFICATION
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Vibe Reader")
-            .setContentText("Reading: $bookName")
-            // Changed to a safe system icon (looks like a book/ledger)
+            .setContentTitle("Reading: $bookName")
+            .setContentText("Expand to capture") // Hint to user
             .setSmallIcon(android.R.drawable.ic_menu_agenda)
             .setContentIntent(openAppPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            // High Priority to ensure visibility on lock screen
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            // Actions
+            // Actions (Text + Icon)
             .addAction(android.R.drawable.ic_menu_search, "Define", definePendingIntent)
-            .addAction(android.R.drawable.ic_menu_add, "Quote", quotePendingIntent)
+            .addAction(android.R.drawable.ic_input_add, "Quote", quotePendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "End", stopPendingIntent)
             .build()
 
@@ -104,7 +104,9 @@ class ReadingSessionService : LifecycleService() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Active Session", NotificationManager.IMPORTANCE_DEFAULT)
+            // IMPORTANCE_HIGH forces the notification to pop/expand
+            val channel = NotificationChannel(CHANNEL_ID, "Active Session", NotificationManager.IMPORTANCE_HIGH)
+            channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
