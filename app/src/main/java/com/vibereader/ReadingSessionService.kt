@@ -11,6 +11,7 @@ import androidx.lifecycle.LifecycleService
 import androidx.media.app.NotificationCompat.MediaStyle
 import com.vibereader.data.db.AppDatabase
 import com.vibereader.data.db.VibeReaderDao
+import com.vibereader.ui.SpeechCaptureActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,6 +39,8 @@ class ReadingSessionService : LifecycleService() {
     companion object {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
+        const val ACTION_DEFINE = "ACTION_DEFINE"
+        const val ACTION_QUOTE = "ACTION_QUOTE"
         const val EXTRA_BOOK_NAME = "EXTRA_BOOK_NAME"
     }
 
@@ -85,6 +88,19 @@ class ReadingSessionService : LifecycleService() {
             isActive = true
         }
 
+        // Intents for capture actions
+        val defineIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
+            action = ACTION_DEFINE
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val definePendingIntent = PendingIntent.getActivity(this, 1, defineIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        val quoteIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
+            action = ACTION_QUOTE
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val quotePendingIntent = PendingIntent.getActivity(this, 2, quoteIntent, PendingIntent.FLAG_IMMUTABLE)
+
         val stopIntent = Intent(this, ReadingSessionService::class.java).apply { action = ACTION_STOP }
         val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
@@ -94,15 +110,17 @@ class ReadingSessionService : LifecycleService() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Vibe Reader")
             .setContentText("Reading: $bookName")
-            .setSmallIcon(android.R.drawable.ic_menu_edit) // Replace with a custom vector icon later
+            .setSmallIcon(android.R.drawable.ic_menu_edit)
             .setContentIntent(openAppPendingIntent)
             .setOngoing(true)
             .setSilent(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setStyle(MediaStyle()
                 .setMediaSession(session.sessionToken)
-                .setShowActionsInCompactView(0))
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "End Session", stopPendingIntent)
+                .setShowActionsInCompactView(0, 1, 2)) // Show Define, Quote, and End
+            .addAction(android.R.drawable.ic_btn_speak_now, "Define", definePendingIntent)
+            .addAction(android.R.drawable.ic_menu_edit, "Quote", quotePendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "End", stopPendingIntent)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)

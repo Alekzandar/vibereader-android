@@ -1,106 +1,72 @@
 package com.vibereader.ui
 
-import android.content.Context
-import android.content.Intent
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider // <-- MOVED THIS IMPORT HERE
 import androidx.lifecycle.viewModelScope
-import com.vibereader.ReadingSessionService
-import com.vibereader.data.db.AppDatabase
-import com.vibereader.data.db.Session
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import com.vibereader.data.db.*
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import com.vibereader.data.db.Word
-import com.vibereader.data.db.Quote
 
-class SessionViewModel(
-    private val db: AppDatabase
-) : ViewModel() {
+/**
+ * Handles the logic for starting/ending relational sessions and
+ * providing the metrics for the Archive.
+ */
+class SessionViewModel(private val database: AppDatabase) : ViewModel() {
+    private val dao = database.vibeReaderDao()
 
-    // Observes the 'active' session from the database.
-    // The UI will automatically update when this changes.
-    val activeSession: StateFlow<Session?> = db.vibeReaderDao().getActiveSession()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = null
-        )
+    // --- State Streams ---
+    val activeSession = dao.getActiveSession()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    // Observes the list of all past sessions.
-    val recentSessions: StateFlow<List<Session>> = db.vibeReaderDao().getAllSessions()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val archiveSessions = dao.getSessionsWithMetrics()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Observes all saved words from the database.
-    val allWords: StateFlow<List<Word>> = db.vibeReaderDao().getAllWords()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val knownBookTitles = dao.getAllBookTitles()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Observes all saved quotes from the database.
-    val allQuotes: StateFlow<List<Quote>> = db.vibeReaderDao().getAllQuotes()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-    fun startSession(context: Context, bookTitle: String) {
+    // --- Drill-down State (for Archive) ---
+    private val _selectedSessionId = MutableStateFlow<Long?>(null)
+    val selectedSessionId = _selectedSessionId.asStateFlow()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val filteredWords = _selectedSessionId.flatMapLatest { id ->
+        if (id == null) flowOf(emptyList()) else dao.getWordsForSession(id)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val filteredQuotes = _selectedSessionId.flatMapLatest { id ->
+        if (id == null) flowOf(emptyList()) else dao.getQuotesForSession(id)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Actions ---
+
+    fun selectArchiveSession(id: Long?) { _selectedSessionId.value = id }
+
+    fun startSession(title: String) {
         viewModelScope.launch {
-            // 1. Create a new session in the database
-            val newSession = Session(
-                bookTitle = bookTitle,
-                startTime = System.currentTimeMillis(),
-                status = "active"
-            )
-            // 2. Get the new ID back from the insert operation
-            val newSessionId = db.vibeReaderDao().insertSession(newSession)
+            // 1. Relational Check: Create book if it doesn't exist
+            val book = dao.getBookByTitle(title)
+            val bookId = book?.bookId ?: dao.insertBook(Book(title = title))
 
-            // 3. Start the ForegroundService and PASS THE ID
-            val intent = Intent(context, ReadingSessionService::class.java).apply {
-                action = ReadingSessionService.ACTION_START_SESSION
-                putExtra(ReadingSessionService.EXTRA_BOOK_TITLE, bookTitle)
+            // 2. Auto-naming: e.g., "The Book: Session 2"
+            val count = dao.getSessionCountForBook(bookId)
+            val displayName = if (count == 0) title else "$title: Session ${count + 1}"
 
-                putExtra(ReadingSessionService.EXTRA_SESSION_ID, newSessionId)
-            }
-            context.startForegroundService(intent)
+            // 3. Start Session
+            dao.insertSession(Session(
+                bookId = bookId,
+                displayName = displayName,
+                startTime = System.currentTimeMillis()
+            ))
         }
     }
 
-    fun stopSession(context: Context) {
+    fun endSession() {
         viewModelScope.launch {
-            activeSession.value?.let { currentSession ->
-                // 1. Update the session in the database
-                db.vibeReaderDao().updateSessionStatus(
-                    sessionId = currentSession.sessionId,
-                    status = "inactive",
-                    endTime = System.currentTimeMillis()
-                )
-
-                // 2. Stop the ForegroundService
-                val intent = Intent(context, ReadingSessionService::class.java).apply {
-                    action = ReadingSessionService.ACTION_STOP_SESSION
-                }
-                context.startService(intent) // Use startService to send a command
-            }
+            val current = activeSession.value ?: return@launch
+            dao.updateSession(current.copy(
+                status = "inactive",
+                endTime = System.currentTimeMillis()
+            ))
         }
-    }
-}
-
-// We'll need this ViewModelFactory to pass the database to the ViewModel
-// Put this at the bottom of the same file
-@Suppress("UNCHECKED_CAST")
-class SessionViewModelFactory(private val db: AppDatabase) : ViewModelProvider.Factory {
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(SessionViewModel::class.java)) {
-            return SessionViewModel(db) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
