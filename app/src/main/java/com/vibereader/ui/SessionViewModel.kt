@@ -1,19 +1,27 @@
 package com.vibereader.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.Intent
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.vibereader.ReadingSessionService
 import com.vibereader.data.db.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 /**
- * Handles the logic for starting/ending relational sessions and
- * providing the metrics for the Archive.
+ * The central logic hub for Vibe Reader.
+ * Extends AndroidViewModel to access the Application context internally,
+ * allowing the UI to start/stop sessions without passing Context parameters.
  */
-class SessionViewModel(private val database: AppDatabase) : ViewModel() {
+class SessionViewModel(
+    application: Application,
+    private val database: AppDatabase
+) : AndroidViewModel(application) {
+
     private val dao = database.vibeReaderDao()
 
-    // --- State Streams ---
+    // --- State Streams for the UI ---
     val activeSession = dao.getActiveSession()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
@@ -23,7 +31,7 @@ class SessionViewModel(private val database: AppDatabase) : ViewModel() {
     val knownBookTitles = dao.getAllBookTitles()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // --- Drill-down State (for Archive) ---
+    // --- Archive Selection State ---
     private val _selectedSessionId = MutableStateFlow<Long?>(null)
     val selectedSessionId = _selectedSessionId.asStateFlow()
 
@@ -39,34 +47,63 @@ class SessionViewModel(private val database: AppDatabase) : ViewModel() {
 
     // --- Actions ---
 
-    fun selectArchiveSession(id: Long?) { _selectedSessionId.value = id }
+    /**
+     * Updates the current session selection for the Archive detail view.
+     */
+    fun selectArchiveSession(id: Long?) {
+        _selectedSessionId.value = id
+    }
 
+    /**
+     * Starts a reading session and the background service.
+     * Logic: Auto-creates book if needed, auto-names session, starts Service.
+     */
     fun startSession(title: String) {
         viewModelScope.launch {
-            // 1. Relational Check: Create book if it doesn't exist
+            // 1. Get or Create Book
             val book = dao.getBookByTitle(title)
             val bookId = book?.bookId ?: dao.insertBook(Book(title = title))
 
-            // 2. Auto-naming: e.g., "The Book: Session 2"
+            // 2. Auto-naming
             val count = dao.getSessionCountForBook(bookId)
             val displayName = if (count == 0) title else "$title: Session ${count + 1}"
 
-            // 3. Start Session
+            // 3. Create Session
             dao.insertSession(Session(
                 bookId = bookId,
                 displayName = displayName,
-                startTime = System.currentTimeMillis()
+                startTime = System.currentTimeMillis(),
+                status = "active"
             ))
+
+            // 4. Trigger the background service using internal application context
+            val context = getApplication<Application>()
+            val intent = Intent(context, ReadingSessionService::class.java).apply {
+                action = ReadingSessionService.ACTION_START
+                putExtra(ReadingSessionService.EXTRA_BOOK_NAME, displayName)
+            }
+            context.startService(intent)
         }
     }
 
+    /**
+     * Ends the active session and stops the background service.
+     */
     fun endSession() {
+        val current = activeSession.value ?: return
         viewModelScope.launch {
-            val current = activeSession.value ?: return@launch
+            // 1. Update Database
             dao.updateSession(current.copy(
                 status = "inactive",
                 endTime = System.currentTimeMillis()
             ))
+
+            // 2. Stop Service
+            val context = getApplication<Application>()
+            val intent = Intent(context, ReadingSessionService::class.java).apply {
+                action = ReadingSessionService.ACTION_STOP
+            }
+            context.startService(intent)
         }
     }
 }

@@ -20,14 +20,15 @@ abstract class AppDatabase : RoomDatabase() {
 
         /**
          * Returns the singleton instance of the database.
-         * destructiveMigration is enabled to handle the transition from the old flat schema.
+         * Using "vibe_reader_db" to ensure consistency across the UI and Background Service.
+         * destructiveMigration is enabled to handle the transition to the relational schema.
          */
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "vibe_reader_database"
+                    "vibe_reader_db"
                 )
                     .fallbackToDestructiveMigration()
                     .build()

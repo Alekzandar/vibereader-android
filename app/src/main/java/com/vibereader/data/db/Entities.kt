@@ -6,6 +6,10 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+/**
+ * The high-level Book entity.
+ * Sessions, Words, and Quotes are all linked back to a specific Book.
+ */
 @Entity(tableName = "books", indices = [Index(value = ["title"], unique = true)])
 data class Book(
     @PrimaryKey(autoGenerate = true)
@@ -19,6 +23,10 @@ data class Book(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+/**
+ * A reading session linked to a Book.
+ * Tracks start/end times and the 'active' status.
+ */
 @Entity(
     tableName = "sessions",
     foreignKeys = [
@@ -39,7 +47,7 @@ data class Session(
     val bookId: Long,
 
     @ColumnInfo(name = "display_name")
-    val displayName: String, // e.g., "The Great Gatsby: Session 2"
+    val displayName: String,
 
     @ColumnInfo(name = "start_time")
     val startTime: Long,
@@ -51,6 +59,9 @@ data class Session(
     val status: String = "active"
 )
 
+/**
+ * Vocabulary words captured during a session.
+ */
 @Entity(
     tableName = "words",
     foreignKeys = [
@@ -78,10 +89,13 @@ data class Word(
     @ColumnInfo(name = "timestamp")
     val timestamp: Long,
 
-    @ColumnInfo(name = "is_favorite", defaultValue = "0")
+    @ColumnInfo(name = "is_favorite")
     val isFavorite: Boolean = false
 )
 
+/**
+ * Quotes captured during a session.
+ */
 @Entity(
     tableName = "quotes",
     foreignKeys = [
@@ -106,6 +120,6 @@ data class Quote(
     @ColumnInfo(name = "timestamp")
     val timestamp: Long,
 
-    @ColumnInfo(name = "is_favorite", defaultValue = "0")
+    @ColumnInfo(name = "is_favorite")
     val isFavorite: Boolean = false
 )

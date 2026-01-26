@@ -14,10 +14,6 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.vibereader.ui.session.ActiveSessionView
 import com.vibereader.ui.session.StartSessionView
 
-/**
- * SessionScreen handles the "Reading" tab.
- * It coordinates permissions and observes the relational active session.
- */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun SessionScreen(viewModel: SessionViewModel) {
@@ -38,22 +34,19 @@ fun SessionScreen(viewModel: SessionViewModel) {
 
     Surface(modifier = Modifier.fillMaxSize()) {
         if (!permissionState.allPermissionsGranted) {
-            // Show a screen to request permissions first
             PermissionRequestScreen(permissionState)
         } else {
             // --- 3. Relational UI Logic ---
             if (activeSession == null) {
-                // If no session is active, show the "Start Session" UI
-                // This component is located in com.vibereader.ui.session
                 StartSessionView(
+                    // UPDATE: No context needed here anymore!
                     onStart = { title -> viewModel.startSession(title) },
                     knownTitles = knownTitles
                 )
             } else {
-                // If a session is active, show the "Active" UI
-                // This component is located in com.vibereader.ui.session
                 ActiveSessionView(
                     sessionName = activeSession!!.displayName,
+                    // UPDATE: No context needed here anymore!
                     onEnd = { viewModel.endSession() }
                 )
             }
@@ -61,35 +54,19 @@ fun SessionScreen(viewModel: SessionViewModel) {
     }
 }
 
-/**
- * Permission Request Screen
- * Ensures the user grants Microphone and Notification access for the Lock Screen flows.
- */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun PermissionRequestScreen(
     permissionState: com.google.accompanist.permissions.MultiplePermissionsState
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            "Permissions Required",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
+        Text("Permissions Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
-        Text(
-            "Vibe Reader needs a few permissions to work:\n\n" +
-                    "• Notifications: To show the lock screen controls.\n" +
-                    "• Microphone: To capture words and quotes.",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
+        Text("Vibe Reader needs notifications for the lock screen and microphone access to capture quotes.", textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Spacer(Modifier.height(24.dp))
         Button(onClick = { permissionState.launchMultiplePermissionRequest() }) {
             Text("Grant Permissions")
