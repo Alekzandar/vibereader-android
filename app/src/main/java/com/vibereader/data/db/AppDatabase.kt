@@ -5,28 +5,33 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [Session::class, Word::class, Quote::class], version = 1)
+/**
+ * The main Room Database for Vibe Reader.
+ * Version 1 includes the relational entities: Book, Session, Word, and Quote.
+ */
+@Database(entities = [Book::class, Session::class, Word::class, Quote::class], version = 1, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun vibeReaderDao(): VibeReaderDao
 
     companion object {
-        // Volatile ensures this variable is always up-to-date across all threads
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        /**
+         * Returns the singleton instance of the database.
+         * destructiveMigration is enabled to handle the transition from the old flat schema.
+         */
         fun getDatabase(context: Context): AppDatabase {
-            // Return the existing instance if it's already created
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "vibe_reader_database"
                 )
-                    .fallbackToDestructiveMigration() // Simple migration for MVP
+                    .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
-                // return instance
                 instance
             }
         }

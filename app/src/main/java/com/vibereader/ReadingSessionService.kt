@@ -1,180 +1,154 @@
 package com.vibereader
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
+import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.support.v4.media.session.MediaSessionCompat
-import android.util.Log
-import android.widget.Toast
+import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.media.app.NotificationCompat.MediaStyle
-import com.vibereader.ui.SpeechCaptureActivity
+import com.vibereader.data.db.AppDatabase
+import com.vibereader.data.db.VibeReaderDao
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
+/**
+ * The core background service for Vibe Reader.
+ * It manages the MediaSession for lock screen controls and ensures
+ * that reading sessions are correctly linked and closed in the database.
+ * * Note: Uses manual DI via AppDatabase singleton for stability and simplicity.
+ */
 class ReadingSessionService : LifecycleService() {
 
+    private lateinit var dao: VibeReaderDao
     private var mediaSession: MediaSessionCompat? = null
-    private lateinit var notificationManager: NotificationManager
 
-    private var activeSessionId: Long = -1L
-    private var currentBookTitle: String = "No Session"
+    // SupervisorJob ensures that a failure in one DB write doesn't kill the whole scope
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val CHANNEL_ID = "vibe_reader_notifications"
+    private val NOTIFICATION_ID = 1001
+
+    companion object {
+        const val ACTION_START = "ACTION_START"
+        const val ACTION_STOP = "ACTION_STOP"
+        const val EXTRA_BOOK_NAME = "EXTRA_BOOK_NAME"
+    }
 
     override fun onCreate() {
         super.onCreate()
-        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        createNotificationChannel()
-
-        mediaSession = MediaSessionCompat(this, "ReadingSessionService").apply {
-            isActive = true
-        }
+        // Initialize the DAO using your existing AppDatabase singleton
+        dao = AppDatabase.getDatabase(this).vibeReaderDao()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-
         when (intent?.action) {
-            ACTION_START_SESSION -> {
-                currentBookTitle = intent.getStringExtra(EXTRA_BOOK_TITLE) ?: "Reading"
-                activeSessionId = intent.getLongExtra(EXTRA_SESSION_ID, -1L)
-
-                Log.d("Service", "Starting session $activeSessionId for: $currentBookTitle")
-
-                if (activeSessionId == -1L) {
-                    Log.e("Service", "Invalid session ID. Stopping.")
-                    stopService()
-                    return START_NOT_STICKY
-                }
-
-                // We call buildNotification() here, AFTER activeSessionId is set
-                startForeground(NOTIFICATION_ID, buildNotification())
+            ACTION_START -> {
+                val bookName = intent.getStringExtra(EXTRA_BOOK_NAME) ?: "New Book"
+                showNotification(bookName)
             }
-            ACTION_STOP_SESSION -> {
-                Log.d("Service", "Stopping session")
-                stopService()
+            ACTION_STOP -> {
+                endActiveSession()
             }
-            // --- REMOVED ---
-            // We no longer need to handle DEFINE_WORD or SAVE_QUOTE here.
-            // The notification PendingIntents will do it directly.
         }
         return START_STICKY
     }
 
-    // --- REMOVED ---
-    // We no longer need the launchSpeechCapture function.
+    private fun showNotification(bookName: String) {
+        createNotificationChannel()
 
-    private fun buildNotification(): android.app.Notification {
-
-        // --- THIS IS THE KEY FIX ---
-        // We create PendingIntents that launch the Activity directly.
-
-        // Create the "Define Word" intent
-        val defineWordIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(SpeechCaptureActivity.EXTRA_SESSION_ID, activeSessionId)
-            putExtra(SpeechCaptureActivity.EXTRA_CAPTURE_MODE, SpeechCaptureActivity.CaptureMode.DEFINE_WORD)
+        // Initialize or update the MediaSession
+        val session = mediaSession ?: MediaSessionCompat(this, "VibeReaderSession").also {
+            mediaSession = it
         }
-        // Note: We use a different request code for each PendingIntent
-        val defineWordPendingIntent = PendingIntent.getActivity(
-            this,
-            REQUEST_CODE_DEFINE,
-            defineWordIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT // UPDATE_CURRENT is critical
-        )
-        val defineAction = NotificationCompat.Action(
-            R.drawable.ic_define_word,
-            "Define Word",
-            defineWordPendingIntent
-        )
 
-        // Create the "Save Quote" intent
-        val saveQuoteIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(SpeechCaptureActivity.EXTRA_SESSION_ID, activeSessionId)
-            putExtra(SpeechCaptureActivity.EXTRA_CAPTURE_MODE, SpeechCaptureActivity.CaptureMode.SAVE_QUOTE)
-        }
-        val saveQuotePendingIntent = PendingIntent.getActivity(
-            this,
-            REQUEST_CODE_SAVE,
-            saveQuoteIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val saveQuoteAction = NotificationCompat.Action(
-            R.drawable.ic_save_quote,
-            "Save Quote",
-            saveQuotePendingIntent
-        )
-        // --- END OF FIX ---
-
-        val stopIntent = Intent(this, ReadingSessionService::class.java).apply {
-            action = ACTION_STOP_SESSION
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this,
-            REQUEST_CODE_STOP,
-            stopIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Vibe Reader: $currentBookTitle")
-            .setContentText("Session in progress...")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(true)
-            .addAction(defineAction)
-            .addAction(saveQuoteAction)
-            .setStyle(
-                MediaStyle()
-                    .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1)
+        session.apply {
+            setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setState(PlaybackStateCompat.STATE_PLAYING, 0, 1.0f)
+                    .setActions(PlaybackStateCompat.ACTION_STOP)
+                    .build()
             )
-            .setDeleteIntent(stopPendingIntent)
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onStop() {
+                    // Triggered by the system media controls (Lock Screen)
+                    endActiveSession()
+                }
+            })
+            isActive = true
+        }
+
+        val stopIntent = Intent(this, ReadingSessionService::class.java).apply { action = ACTION_STOP }
+        val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        val openAppIntent = Intent(this, MainActivity::class.java)
+        val openAppPendingIntent = PendingIntent.getActivity(this, 0, openAppIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Vibe Reader")
+            .setContentText("Reading: $bookName")
+            .setSmallIcon(android.R.drawable.ic_menu_edit) // Replace with a custom vector icon later
+            .setContentIntent(openAppPendingIntent)
+            .setOngoing(true)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setStyle(MediaStyle()
+                .setMediaSession(session.sessionToken)
+                .setShowActionsInCompactView(0))
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "End Session", stopPendingIntent)
             .build()
+
+        startForeground(NOTIFICATION_ID, notification)
     }
 
-    private fun stopService() {
-        mediaSession?.release()
-        mediaSession = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+    /**
+     * Relational Linkage: Updates the database status before stopping the service.
+     */
+    private fun endActiveSession() {
+        serviceScope.launch {
+            // Use .first() to grab the current active session state immediately
+            val active = dao.getActiveSession().first()
+            if (active != null) {
+                dao.updateSession(active.copy(
+                    status = "inactive",
+                    endTime = System.currentTimeMillis()
+                ))
+            }
+
+            // Explicitly update the MediaSession state before stopping
+            mediaSession?.setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setState(PlaybackStateCompat.STATE_STOPPED, 0, 0f)
+                    .build()
+            )
+
+            // Finalize the service lifecycle
+            stopSelf()
+        }
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Vibe Reader Session",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Controls for the active Vibe Reader session"
-                setSound(null, null)
-                enableVibration(false)
-            }
-            notificationManager.createNotificationChannel(channel)
+            val channel = NotificationChannel(CHANNEL_ID, "Active Session", NotificationManager.IMPORTANCE_LOW)
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
         }
     }
 
     override fun onDestroy() {
-        mediaSession?.release()
+        // Clean up system resources to prevent "ghost" notifications or memory leaks
+        mediaSession?.let {
+            it.isActive = false
+            it.release()
+        }
+        serviceScope.cancel()
         super.onDestroy()
-    }
-
-    companion object {
-        const val CHANNEL_ID = "ReadingSessionChannel"
-        const val NOTIFICATION_ID = 1
-        const val ACTION_START_SESSION = "com.vibereader.ACTION_START_SESSION"
-        const val ACTION_STOP_SESSION = "com.vibereader.ACTION_STOP_SESSION"
-
-        // We no longer need the other actions
-
-        const val EXTRA_BOOK_TITLE = "com.vibereader.EXTRA_BOOK_TITLE"
-        const val EXTRA_SESSION_ID = "com.vibereader.EXTRA_SESSION_ID"
-
-        const val REQUEST_CODE_DEFINE = 101
-        const val REQUEST_CODE_SAVE = 102
-        const val REQUEST_CODE_STOP = 103
     }
 }
