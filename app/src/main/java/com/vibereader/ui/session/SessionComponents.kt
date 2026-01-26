@@ -1,5 +1,6 @@
 package com.vibereader.ui.session
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,9 +16,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibereader.data.db.*
+import com.vibereader.ui.SpeechCaptureActivity
 
 /**
  * The UI for starting a session.
@@ -75,10 +78,12 @@ fun StartSessionView(onStart: (String) -> Unit, knownTitles: List<String>) {
 
 /**
  * The UI for an active session.
- * Displays the current book name and the "End Session" action.
+ * Displays the current book name, capture buttons, and the "End Session" action.
  */
 @Composable
 fun ActiveSessionView(sessionName: String, onEnd: () -> Unit) {
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -90,6 +95,37 @@ fun ActiveSessionView(sessionName: String, onEnd: () -> Unit) {
             style = MaterialTheme.typography.headlineLarge,
             modifier = Modifier.padding(vertical = 16.dp)
         )
+
+        Spacer(Modifier.height(32.dp))
+
+        // --- In-App Capture Buttons for Testing ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Button(onClick = {
+                val intent = Intent(context, SpeechCaptureActivity::class.java).apply {
+                    action = "ACTION_DEFINE"
+                }
+                context.startActivity(intent)
+            }) {
+                Icon(Icons.Default.Search, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Define")
+            }
+
+            Button(onClick = {
+                val intent = Intent(context, SpeechCaptureActivity::class.java).apply {
+                    action = "ACTION_QUOTE"
+                }
+                context.startActivity(intent)
+            }) {
+                Icon(Icons.Default.Mic, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Quote")
+            }
+        }
+
         Spacer(Modifier.height(48.dp))
 
         Button(

@@ -4,11 +4,8 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.support.v4.media.session.MediaSessionCompat
-import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
-import androidx.media.app.NotificationCompat.MediaStyle
 import com.vibereader.data.db.AppDatabase
 import com.vibereader.data.db.VibeReaderDao
 import com.vibereader.ui.SpeechCaptureActivity
@@ -19,18 +16,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-/**
- * The core background service for Vibe Reader.
- * It manages the MediaSession for lock screen controls and ensures
- * that reading sessions are correctly linked and closed in the database.
- * * Note: Uses manual DI via AppDatabase singleton for stability and simplicity.
- */
 class ReadingSessionService : LifecycleService() {
 
     private lateinit var dao: VibeReaderDao
-    private var mediaSession: MediaSessionCompat? = null
-
-    // SupervisorJob ensures that a failure in one DB write doesn't kill the whole scope
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val CHANNEL_ID = "vibe_reader_notifications"
@@ -46,7 +34,6 @@ class ReadingSessionService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        // Initialize the DAO using your existing AppDatabase singleton
         dao = AppDatabase.getDatabase(this).vibeReaderDao()
     }
 
@@ -57,36 +44,13 @@ class ReadingSessionService : LifecycleService() {
                 val bookName = intent.getStringExtra(EXTRA_BOOK_NAME) ?: "New Book"
                 showNotification(bookName)
             }
-            ACTION_STOP -> {
-                endActiveSession()
-            }
+            ACTION_STOP -> endActiveSession()
         }
         return START_STICKY
     }
 
     private fun showNotification(bookName: String) {
         createNotificationChannel()
-
-        // Initialize or update the MediaSession
-        val session = mediaSession ?: MediaSessionCompat(this, "VibeReaderSession").also {
-            mediaSession = it
-        }
-
-        session.apply {
-            setPlaybackState(
-                PlaybackStateCompat.Builder()
-                    .setState(PlaybackStateCompat.STATE_PLAYING, 0, 1.0f)
-                    .setActions(PlaybackStateCompat.ACTION_STOP)
-                    .build()
-            )
-            setCallback(object : MediaSessionCompat.Callback() {
-                override fun onStop() {
-                    // Triggered by the system media controls (Lock Screen)
-                    endActiveSession()
-                }
-            })
-            isActive = true
-        }
 
         // Intents for capture actions
         val defineIntent = Intent(this, SpeechCaptureActivity::class.java).apply {
@@ -107,65 +71,46 @@ class ReadingSessionService : LifecycleService() {
         val openAppIntent = Intent(this, MainActivity::class.java)
         val openAppPendingIntent = PendingIntent.getActivity(this, 0, openAppIntent, PendingIntent.FLAG_IMMUTABLE)
 
+        // STANDARD NOTIFICATION (No MediaStyle)
+        // Uses standard icons to avoid "Unresolved reference" errors
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Vibe Reader")
             .setContentText("Reading: $bookName")
-            .setSmallIcon(android.R.drawable.ic_menu_edit)
+            // Changed to a safe system icon (looks like a book/ledger)
+            .setSmallIcon(android.R.drawable.ic_menu_agenda)
             .setContentIntent(openAppPendingIntent)
             .setOngoing(true)
-            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setStyle(MediaStyle()
-                .setMediaSession(session.sessionToken)
-                .setShowActionsInCompactView(0, 1, 2)) // Show Define, Quote, and End
-            .addAction(android.R.drawable.ic_btn_speak_now, "Define", definePendingIntent)
-            .addAction(android.R.drawable.ic_menu_edit, "Quote", quotePendingIntent)
+            // Actions
+            .addAction(android.R.drawable.ic_menu_search, "Define", definePendingIntent)
+            .addAction(android.R.drawable.ic_menu_add, "Quote", quotePendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "End", stopPendingIntent)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
     }
 
-    /**
-     * Relational Linkage: Updates the database status before stopping the service.
-     */
     private fun endActiveSession() {
         serviceScope.launch {
-            // Use .first() to grab the current active session state immediately
             val active = dao.getActiveSession().first()
             if (active != null) {
-                dao.updateSession(active.copy(
-                    status = "inactive",
-                    endTime = System.currentTimeMillis()
-                ))
+                dao.updateSession(active.copy(status = "inactive", endTime = System.currentTimeMillis()))
             }
-
-            // Explicitly update the MediaSession state before stopping
-            mediaSession?.setPlaybackState(
-                PlaybackStateCompat.Builder()
-                    .setState(PlaybackStateCompat.STATE_STOPPED, 0, 0f)
-                    .build()
-            )
-
-            // Finalize the service lifecycle
             stopSelf()
         }
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Active Session", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(CHANNEL_ID, "Active Session", NotificationManager.IMPORTANCE_DEFAULT)
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
     }
 
     override fun onDestroy() {
-        // Clean up system resources to prevent "ghost" notifications or memory leaks
-        mediaSession?.let {
-            it.isActive = false
-            it.release()
-        }
         serviceScope.cancel()
         super.onDestroy()
     }
