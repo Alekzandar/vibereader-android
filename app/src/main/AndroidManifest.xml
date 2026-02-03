@@ -3,11 +3,14 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- REQUIRED: Permission for standard background processing -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Permission for media playback service (Trojan Horse) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Permission for launching activity from lock screen (like alarm/call apps) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="true"
@@ -31,11 +34,11 @@
             </intent-filter>
         </activity>
 
-        <!-- UPDATED: Type is dataSync for standard notification -->
+        <!-- UPDATED: Type is mediaPlayback for the Trojan Horse MediaStyle notification -->
         <service
             android:name=".ReadingSessionService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="mediaPlayback" />
 
         <activity
             android:name=".ui.SpeechCaptureActivity"

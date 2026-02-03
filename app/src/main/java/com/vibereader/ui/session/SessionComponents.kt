@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,8 +18,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vibereader.ReadingSessionService
 import com.vibereader.data.db.*
 import com.vibereader.ui.SpeechCaptureActivity
 
@@ -31,10 +35,15 @@ fun StartSessionView(onStart: (String) -> Unit, knownTitles: List<String>) {
     var title by remember { mutableStateOf("") }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text("What are you reading?", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            "What are you reading?",
+            style = MaterialTheme.typography.headlineMedium
+        )
         Spacer(Modifier.height(16.dp))
 
         OutlinedTextField(
@@ -68,71 +77,127 @@ fun StartSessionView(onStart: (String) -> Unit, knownTitles: List<String>) {
 
         Button(
             onClick = { onStart(title) },
-            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 24.dp),
             enabled = title.isNotBlank()
         ) {
-            Text("Start Flow")
+            Text("Start Reading")
         }
     }
 }
 
 /**
  * The UI for an active session.
- * Displays the current book name, capture buttons, and the "End Session" action.
+ * Features a prominent Smart Capture button with secondary Define/Quote options.
  */
 @Composable
 fun ActiveSessionView(sessionName: String, onEnd: () -> Unit) {
     val context = LocalContext.current
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Current Flow", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        // Session info
+        Text(
+            "Currently Reading",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
         Text(
             sessionName,
             style = MaterialTheme.typography.headlineLarge,
-            modifier = Modifier.padding(vertical = 16.dp)
+            modifier = Modifier.padding(vertical = 8.dp),
+            textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(32.dp))
+        Text(
+            "Use the lock screen controls, or tap below",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
 
-        // --- In-App Capture Buttons for Testing ---
+        // --- Primary: Smart Capture Button ---
+        Button(
+            onClick = {
+                val intent = Intent(context, SpeechCaptureActivity::class.java).apply {
+                    action = ReadingSessionService.ACTION_SMART_CAPTURE
+                }
+                context.startActivity(intent)
+            },
+            modifier = Modifier
+                .size(120.dp),
+            shape = CircleShape,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Default.Mic,
+                    contentDescription = "Capture",
+                    modifier = Modifier.size(36.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                Text("Capture", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
+        Text(
+            "Tap to speak",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 8.dp, bottom = 32.dp)
+        )
+
+        // --- Secondary: Explicit Define/Quote Buttons ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Button(onClick = {
-                val intent = Intent(context, SpeechCaptureActivity::class.java).apply {
-                    action = "ACTION_DEFINE"
+            OutlinedButton(
+                onClick = {
+                    val intent = Intent(context, SpeechCaptureActivity::class.java).apply {
+                        action = "ACTION_DEFINE"
+                    }
+                    context.startActivity(intent)
                 }
-                context.startActivity(intent)
-            }) {
-                Icon(Icons.Default.Search, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Define")
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Define Word")
             }
 
-            Button(onClick = {
-                val intent = Intent(context, SpeechCaptureActivity::class.java).apply {
-                    action = "ACTION_QUOTE"
+            OutlinedButton(
+                onClick = {
+                    val intent = Intent(context, SpeechCaptureActivity::class.java).apply {
+                        action = "ACTION_QUOTE"
+                    }
+                    context.startActivity(intent)
                 }
-                context.startActivity(intent)
-            }) {
-                Icon(Icons.Default.Mic, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Quote")
+            ) {
+                Icon(Icons.Default.FormatQuote, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Save Quote")
             }
         }
 
         Spacer(Modifier.height(48.dp))
 
-        Button(
+        // --- End Session ---
+        TextButton(
             onClick = onEnd,
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            modifier = Modifier.fillMaxWidth()
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = MaterialTheme.colorScheme.error
+            )
         ) {
+            Icon(Icons.Default.Stop, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
             Text("End Session")
         }
     }
@@ -144,13 +209,48 @@ fun ActiveSessionView(sessionName: String, onEnd: () -> Unit) {
  */
 @Composable
 fun ArchiveListView(sessions: List<SessionWithMetrics>, onSelect: (Long) -> Unit) {
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
         item {
             Text(
                 "Your Library",
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
+        }
+
+        if (sessions.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 64.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.CollectionsBookmark,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = Color.Gray
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "No reading sessions yet",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.Gray
+                        )
+                        Text(
+                            "Start a session to capture your first insights",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
         }
 
         items(sessions) { metrics ->
@@ -194,36 +294,109 @@ fun ArchiveDetailView(onBack: () -> Unit, words: List<Word>, quotes: List<Quote>
         TopAppBar(
             title = { Text("Session Highlights") },
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, "Back")
+                }
             }
         )
 
         LazyColumn(modifier = Modifier.padding(horizontal = 16.dp)) {
             if (words.isNotEmpty()) {
-                item { Text("Words", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 8.dp)) }
-                items(words) { word ->
-                    ListItem(
-                        headlineContent = { Text(word.term) },
-                        supportingContent = { Text(word.definition) },
-                        leadingContent = { Icon(Icons.Default.Translate, null) }
+                item {
+                    Text(
+                        "Words (${words.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(vertical = 12.dp)
                     )
+                }
+                items(words) { word ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    word.term,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    word.definition,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            },
+                            leadingContent = {
+                                Icon(
+                                    Icons.Default.Translate,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        )
+                    }
                 }
             }
 
             if (quotes.isNotEmpty()) {
-                item { Text("Quotes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)) }
-                items(quotes) { quote ->
-                    ListItem(
-                        headlineContent = { Text("\"${quote.content}\"") },
-                        leadingContent = { Icon(Icons.Default.FormatQuote, null) }
+                item {
+                    Text(
+                        "Quotes (${quotes.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = 20.dp, bottom = 12.dp)
                     )
+                }
+                items(quotes) { quote ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    "\"${quote.content}\"",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            },
+                            leadingContent = {
+                                Icon(
+                                    Icons.Default.FormatQuote,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        )
+                    }
                 }
             }
 
             if (words.isEmpty() && quotes.isEmpty()) {
                 item {
-                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No captures in this session.", color = Color.Gray)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 64.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.SpeakerNotesOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = Color.Gray
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "No captures in this session",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.Gray
+                            )
+                        }
                     }
                 }
             }

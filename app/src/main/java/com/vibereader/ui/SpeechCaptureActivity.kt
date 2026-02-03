@@ -1,501 +1,441 @@
 package com.vibereader.ui
 
-
-
 import android.app.KeyguardManager
-
 import android.content.Context
-
 import android.content.Intent
-
 import android.os.Build
-
 import android.os.Bundle
-
 import android.speech.RecognitionListener
-
 import android.speech.RecognizerIntent
-
 import android.speech.SpeechRecognizer
-
 import android.speech.tts.TextToSpeech
-
 import android.util.Log
-
 import android.view.WindowManager
-
 import android.widget.Toast
-
 import androidx.activity.ComponentActivity
-
 import androidx.activity.compose.setContent
-
 import androidx.compose.foundation.background
-
 import androidx.compose.foundation.layout.*
-
 import androidx.compose.material3.*
-
 import androidx.compose.runtime.*
-
 import androidx.compose.ui.Alignment
-
 import androidx.compose.ui.Modifier
-
 import androidx.compose.ui.graphics.Color
-
 import androidx.compose.ui.text.style.TextAlign
-
 import androidx.compose.ui.unit.dp
-
 import androidx.lifecycle.lifecycleScope
-
+import com.vibereader.ReadingSessionService
 import com.vibereader.data.db.AppDatabase
-
 import com.vibereader.data.db.Quote
-
 import com.vibereader.data.db.Word
-
 import com.vibereader.data.network.RetrofitClient
-
 import com.vibereader.ui.theme.VibeReaderTheme
-
 import kotlinx.coroutines.flow.first
-
 import kotlinx.coroutines.launch
-
 import java.util.Locale
 
-
-
 /**
-
  * Translucent overlay activity for hands-free capture.
-
- * Handles voice-to-text for Definitions and Quotes, automatically
-
- * dual-tagging them to the active Book and Session in the database.
-
+ *
+ * Supports three modes:
+ * - DEFINE_WORD: Explicitly define a word
+ * - SAVE_QUOTE: Explicitly save a quote
+ * - SMART_CAPTURE: Auto-detect based on input length (1 word = define, >1 = quote)
  */
-
 class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
-
-
     private lateinit var speechRecognizer: SpeechRecognizer
-
     private lateinit var tts: TextToSpeech
-
-    private var captureMode: CaptureMode = CaptureMode.SAVE_QUOTE
-
-
+    private var captureMode: CaptureMode = CaptureMode.SMART_CAPTURE
 
     // UI State
-
     private val uiState = mutableStateOf(CaptureState.LISTENING)
-
     private val spokenText = mutableStateOf("")
-
     private val definitionText = mutableStateOf("")
+    private val detectedMode = mutableStateOf<CaptureMode?>(null)
 
-
-
-    private enum class CaptureState { LISTENING, VERIFYING, SAVING, DEFINING, ERROR }
-
-    enum class CaptureMode { SAVE_QUOTE, DEFINE_WORD }
-
-
+    private enum class CaptureState { LISTENING, VERIFYING, SAVING, DEFINING, SUCCESS, ERROR }
+    enum class CaptureMode { SAVE_QUOTE, DEFINE_WORD, SMART_CAPTURE }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-
         super.onCreate(savedInstanceState)
 
-
-
         // 1. Ensure the activity can show over the lock screen
-
         setupLockScreenVisibility()
 
-
-
-        // 2. Determine mode from Intent Action (sent by ReadingSessionService)
-
-        val action = intent.action
-
-        captureMode = if (action == "ACTION_DEFINE") CaptureMode.DEFINE_WORD else CaptureMode.SAVE_QUOTE
-
-
+        // 2. Determine mode from Intent Action
+        captureMode = when (intent.action) {
+            "ACTION_DEFINE" -> CaptureMode.DEFINE_WORD
+            "ACTION_QUOTE" -> CaptureMode.SAVE_QUOTE
+            ReadingSessionService.ACTION_SMART_CAPTURE -> CaptureMode.SMART_CAPTURE
+            else -> CaptureMode.SMART_CAPTURE
+        }
 
         // 3. Initialize Services
-
         tts = TextToSpeech(this, this)
-
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-
         speechRecognizer.setRecognitionListener(speechRecognitionListener)
 
-
-
         setContent {
-
             VibeReaderTheme {
-
                 Box(
-
                     modifier = Modifier
-
                         .fillMaxSize()
-
-                        .background(Color.Black.copy(alpha = 0.7f)),
-
+                        .background(Color.Black.copy(alpha = 0.85f)),
                     contentAlignment = Alignment.Center
-
                 ) {
-
                     CaptureScreen()
-
                 }
-
             }
-
         }
-
-
 
         startListening()
-
     }
-
-
 
     private fun setupLockScreenVisibility() {
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-
             setShowWhenLocked(true)
-
             setTurnScreenOn(true)
-
             val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-
             km.requestDismissKeyguard(this, null)
-
         } else {
-
             window.addFlags(
-
                 WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-
                         WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-
                         WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-
             )
-
         }
-
     }
 
-
-
     @Composable
-
     private fun CaptureScreen() {
-
         val state by remember { uiState }
-
         val sText by remember { spokenText }
-
         val dText by remember { definitionText }
-
-
+        val detected by remember { detectedMode }
 
         Column(
-
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
-
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
-
         ) {
+            // Mode indicator
+            val modeLabel = when (captureMode) {
+                CaptureMode.DEFINE_WORD -> "Define Mode"
+                CaptureMode.SAVE_QUOTE -> "Quote Mode"
+                CaptureMode.SMART_CAPTURE -> "Smart Capture"
+            }
+            Text(
+                modeLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.6f)
+            )
+
+            Spacer(Modifier.height(24.dp))
 
             when (state) {
-
-                CaptureState.LISTENING, CaptureState.SAVING -> {
-
-                    CircularProgressIndicator(color = Color.White)
-
-                    Spacer(Modifier.height(16.dp))
-
-                    Text(
-
-                        if (state == CaptureState.LISTENING) "Listening..." else "Saving...",
-
-                        style = MaterialTheme.typography.headlineSmall,
-
-                        color = Color.White
-
+                CaptureState.LISTENING -> {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(64.dp),
+                        strokeWidth = 4.dp
                     )
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        "Listening...",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = Color.White
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (captureMode == CaptureMode.SMART_CAPTURE)
+                            "Say a word to define, or a phrase to quote"
+                        else
+                            "Speak now",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    )
+                }
 
+                CaptureState.SAVING -> {
+                    CircularProgressIndicator(color = Color.White)
+                    Spacer(Modifier.height(16.dp))
+                    Text("Saving...", style = MaterialTheme.typography.headlineSmall, color = Color.White)
                 }
 
                 CaptureState.VERIFYING -> {
+                    Text(
+                        "I heard:",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "\"$sText\"",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
 
-                    Text("I heard:", style = MaterialTheme.typography.titleMedium, color = Color.White)
-
-                    Text("\"$sText\"", style = MaterialTheme.typography.headlineSmall, color = Color.White, textAlign = TextAlign.Center)
-
-                    Spacer(Modifier.height(24.dp))
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-
-                        Button(onClick = { startListening() }) { Text("Retry") }
-
-                        Button(onClick = { saveQuote() }) { Text("Confirm") }
-
+                    if (detected != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "→ Detected as ${if (detected == CaptureMode.DEFINE_WORD) "WORD" else "QUOTE"}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
 
+                    Spacer(Modifier.height(32.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                    ) {
+                        OutlinedButton(
+                            onClick = { startListening() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        ) {
+                            Text("Retry")
+                        }
+                        Button(onClick = { confirmCapture() }) {
+                            Text("Confirm")
+                        }
+                    }
                 }
 
                 CaptureState.DEFINING -> {
-
                     if (dText.isEmpty()) {
-
                         CircularProgressIndicator(color = Color.White)
-
                         Spacer(Modifier.height(16.dp))
-
-                        Text("Defining '$sText'...", color = Color.White)
-
+                        Text(
+                            "Defining '$sText'...",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White
+                        )
                     } else {
-
-                        Text(sText, style = MaterialTheme.typography.headlineSmall, color = Color.White)
-
-                        Text(dText, style = MaterialTheme.typography.bodyLarge, color = Color.White, textAlign = TextAlign.Center)
-
-                        Spacer(Modifier.height(24.dp))
-
-                        Button(onClick = { finish() }) { Text("Done") }
-
+                        Text(
+                            sText,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            dText,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White.copy(alpha = 0.9f),
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(32.dp))
+                        Button(onClick = { finish() }) {
+                            Text("Done")
+                        }
                     }
+                }
 
+                CaptureState.SUCCESS -> {
+                    Text(
+                        "✓",
+                        style = MaterialTheme.typography.displayLarge,
+                        color = Color(0xFF4CAF50)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Saved!",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White
+                    )
                 }
 
                 CaptureState.ERROR -> {
-
-                    Text("Error capturing speech", color = MaterialTheme.colorScheme.error)
-
-                    Spacer(Modifier.height(16.dp))
-
-                    Button(onClick = { finish() }) { Text("Close") }
-
+                    Text(
+                        "Could not capture speech",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { finish() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        ) {
+                            Text("Close")
+                        }
+                        Button(onClick = { startListening() }) {
+                            Text("Try Again")
+                        }
+                    }
                 }
-
             }
-
         }
-
     }
-
-
 
     private fun startListening() {
-
         uiState.value = CaptureState.LISTENING
+        spokenText.value = ""
+        definitionText.value = ""
+        detectedMode.value = null
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
-
         speechRecognizer.startListening(intent)
-
     }
 
-
-
     private fun handleSpeechResult(text: String) {
-
         spokenText.value = text
 
         when (captureMode) {
-
             CaptureMode.SAVE_QUOTE -> {
-
+                // Explicit quote mode - go to verification
+                detectedMode.value = CaptureMode.SAVE_QUOTE
                 uiState.value = CaptureState.VERIFYING
-
                 tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
-
             }
-
             CaptureMode.DEFINE_WORD -> {
-
-                uiState.value = CaptureState.DEFINING
-
-                lifecycleScope.launch {
-
-                    try {
-
-                        val response = RetrofitClient.instance.getDefinition(text)
-
-                        val meaning = response.firstOrNull()?.meanings?.firstOrNull()
-
-                        val def = meaning?.definitions?.firstOrNull()?.definition ?: "No definition found."
-
-                        val formatted = "(${meaning?.partOfSpeech}) $def"
-
-                        definitionText.value = formatted
-
-                        saveWord(text, formatted)
-
-                    } catch (e: Exception) {
-
-                        definitionText.value = "Definition not found."
-
-                        saveWord(text, "Definition not found.")
-
-                    }
-
-                }
-
+                // Explicit define mode - go straight to defining
+                detectedMode.value = CaptureMode.DEFINE_WORD
+                defineWord(text)
             }
+            CaptureMode.SMART_CAPTURE -> {
+                // Smart mode: count words to determine intent
+                val wordCount = text.trim().split("\\s+".toRegex()).size
 
+                if (wordCount <= 2) {
+                    // 1-2 words = probably a word to define
+                    detectedMode.value = CaptureMode.DEFINE_WORD
+                    // Still verify first in smart mode
+                    uiState.value = CaptureState.VERIFYING
+                } else {
+                    // 3+ words = probably a quote
+                    detectedMode.value = CaptureMode.SAVE_QUOTE
+                    uiState.value = CaptureState.VERIFYING
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+                }
+            }
         }
-
     }
 
+    /**
+     * Called when user confirms the captured text.
+     * Routes to either definition or quote saving based on detected mode.
+     */
+    private fun confirmCapture() {
+        val text = spokenText.value
+        val mode = detectedMode.value ?: return
 
+        when (mode) {
+            CaptureMode.DEFINE_WORD -> defineWord(text)
+            CaptureMode.SAVE_QUOTE -> saveQuote()
+            CaptureMode.SMART_CAPTURE -> {} // Should never happen
+        }
+    }
+
+    private fun defineWord(term: String) {
+        uiState.value = CaptureState.DEFINING
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.instance.getDefinition(term.lowercase().trim())
+                val meaning = response.firstOrNull()?.meanings?.firstOrNull()
+                val def = meaning?.definitions?.firstOrNull()?.definition ?: "No definition found."
+                val partOfSpeech = meaning?.partOfSpeech ?: "unknown"
+                val formatted = "($partOfSpeech) $def"
+                definitionText.value = formatted
+                saveWord(term, formatted)
+            } catch (e: Exception) {
+                Log.e("SpeechCapture", "Definition lookup failed", e)
+                definitionText.value = "Definition not found."
+                saveWord(term, "Definition not found.")
+            }
+        }
+    }
 
     private fun saveWord(term: String, definition: String) {
-
         lifecycleScope.launch {
-
             val dao = AppDatabase.getDatabase(applicationContext).vibeReaderDao()
-
-            // Pull the active session to get IDs for tagging
-
             val active = dao.getActiveSession().first()
-
             if (active != null) {
-
-                dao.insertWord(Word(
-
-                    bookId = active.bookId, // Matches bookId in Entities.kt
-
-                    sessionId = active.sessionId, // Matches sessionId in Entities.kt
-
-                    term = term,
-
-                    definition = definition,
-
-                    timestamp = System.currentTimeMillis()
-
-                ))
-
+                dao.insertWord(
+                    Word(
+                        bookId = active.bookId,
+                        sessionId = active.sessionId,
+                        term = term,
+                        definition = definition,
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
             }
-
         }
-
     }
-
-
 
     private fun saveQuote() {
-
         uiState.value = CaptureState.SAVING
-
         lifecycleScope.launch {
-
             val dao = AppDatabase.getDatabase(applicationContext).vibeReaderDao()
-
             val active = dao.getActiveSession().first()
-
             if (active != null) {
-
-                dao.insertQuote(Quote(
-
-                    bookId = active.bookId, // Matches bookId in Entities.kt
-
-                    sessionId = active.sessionId, // Matches sessionId in Entities.kt
-
-                    content = spokenText.value,
-
-                    timestamp = System.currentTimeMillis()
-
-                ))
-
+                dao.insertQuote(
+                    Quote(
+                        bookId = active.bookId,
+                        sessionId = active.sessionId,
+                        content = spokenText.value,
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
+                uiState.value = CaptureState.SUCCESS
                 Toast.makeText(applicationContext, "Quote Saved!", Toast.LENGTH_SHORT).show()
 
+                // Auto-dismiss after brief delay
+                kotlinx.coroutines.delay(800)
                 finish()
-
             }
-
         }
-
     }
-
-
 
     private val speechRecognitionListener = object : RecognitionListener {
-
         override fun onResults(results: Bundle?) {
-
             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-
-            if (!matches.isNullOrEmpty()) handleSpeechResult(matches[0]) else uiState.value = CaptureState.ERROR
-
+            if (!matches.isNullOrEmpty()) {
+                handleSpeechResult(matches[0])
+            } else {
+                uiState.value = CaptureState.ERROR
+            }
         }
 
-        override fun onError(error: Int) { uiState.value = CaptureState.ERROR }
+        override fun onError(error: Int) {
+            Log.e("SpeechCapture", "Speech recognition error: $error")
+            uiState.value = CaptureState.ERROR
+        }
 
         override fun onReadyForSpeech(params: Bundle?) {}
-
         override fun onBeginningOfSpeech() {}
-
         override fun onRmsChanged(rmsdB: Float) {}
-
         override fun onBufferReceived(buffer: ByteArray?) {}
-
         override fun onEndOfSpeech() {}
-
         override fun onPartialResults(partialResults: Bundle?) {}
-
         override fun onEvent(eventType: Int, params: Bundle?) {}
-
     }
-
-
 
     override fun onInit(status: Int) {
-
-        if (status == TextToSpeech.SUCCESS) tts.language = Locale.getDefault()
-
+        if (status == TextToSpeech.SUCCESS) {
+            tts.language = Locale.getDefault()
+        }
     }
-
-
 
     override fun onDestroy() {
-
         speechRecognizer.destroy()
-
         tts.stop()
-
         tts.shutdown()
-
         super.onDestroy()
-
     }
-
-
 
     companion object {
-
         const val EXTRA_SESSION_ID = "com.vibereader.EXTRA_SESSION_ID"
-
         const val EXTRA_CAPTURE_MODE = "com.vibereader.EXTRA_CAPTURE_MODE"
-
     }
-
 }
