@@ -10,13 +10,22 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 /**
+ * Navigation states for the Library tab.
+ */
+enum class LibraryNavState {
+    BOOK_LIST,      // Library View - list of books
+    BOOK_DETAIL,    // Book Detail View - single book expanded
+    SESSION_DETAIL  // Session Detail View - single session's captures
+}
+
+/**
  * The central logic hub for Vibe Reader.
  * Extends AndroidViewModel to access the Application context internally,
  * allowing the UI to start/stop sessions without passing Context parameters.
  */
 class SessionViewModel(
     application: Application,
-    private val database: AppDatabase
+    val database: AppDatabase  // Exposed for ReviewScreen to access DAO
 ) : AndroidViewModel(application) {
 
     private val dao = database.vibeReaderDao()
@@ -25,50 +34,134 @@ class SessionViewModel(
     val activeSession = dao.getActiveSession()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val archiveSessions = dao.getSessionsWithMetrics()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
     val knownBookTitles = dao.getAllBookTitles()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // --- Archive Selection State ---
+    // --- Library Navigation State ---
+    private val _libraryNavState = MutableStateFlow(LibraryNavState.BOOK_LIST)
+    val libraryNavState = _libraryNavState.asStateFlow()
+
+    // --- Book Selection State ---
+    private val _selectedBookId = MutableStateFlow<Long?>(null)
+    val selectedBookId = _selectedBookId.asStateFlow()
+
+    private val _selectedBookTitle = MutableStateFlow<String?>(null)
+    val selectedBookTitle = _selectedBookTitle.asStateFlow()
+
+    // --- Session Selection State ---
     private val _selectedSessionId = MutableStateFlow<Long?>(null)
     val selectedSessionId = _selectedSessionId.asStateFlow()
 
+    private val _selectedSessionName = MutableStateFlow<String?>(null)
+    val selectedSessionName = _selectedSessionName.asStateFlow()
+
+    // --- Book-Level Data Flows ---
+    val booksWithMetrics = dao.getBooksWithMetrics()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val filteredWords = _selectedSessionId.flatMapLatest { id ->
+    val recentSessionsForSelectedBook = _selectedBookId.flatMapLatest { bookId ->
+        if (bookId == null) flowOf(emptyList()) else dao.getRecentSessionsForBook(bookId, 5)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val sessionsForSelectedBook = _selectedBookId.flatMapLatest { bookId ->
+        if (bookId == null) flowOf(emptyList()) else dao.getSessionsForBook(bookId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val wordsForSelectedBook = _selectedBookId.flatMapLatest { bookId ->
+        if (bookId == null) flowOf(emptyList()) else dao.getWordsForBook(bookId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val quotesForSelectedBook = _selectedBookId.flatMapLatest { bookId ->
+        if (bookId == null) flowOf(emptyList()) else dao.getQuotesForBook(bookId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Session-Level Data Flows (for Session Detail) ---
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val wordsForSelectedSession = _selectedSessionId.flatMapLatest { id ->
         if (id == null) flowOf(emptyList()) else dao.getWordsForSession(id)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val filteredQuotes = _selectedSessionId.flatMapLatest { id ->
+    val quotesForSelectedSession = _selectedSessionId.flatMapLatest { id ->
         if (id == null) flowOf(emptyList()) else dao.getQuotesForSession(id)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // --- Actions ---
+    // --- Navigation Actions ---
 
     /**
-     * Updates the current session selection for the Archive detail view.
+     * Select a book to view its details.
      */
-    fun selectArchiveSession(id: Long?) {
-        _selectedSessionId.value = id
+    fun selectBook(bookId: Long?, bookTitle: String? = null) {
+        _selectedBookId.value = bookId
+        _selectedBookTitle.value = bookTitle
+        _libraryNavState.value = if (bookId != null) LibraryNavState.BOOK_DETAIL else LibraryNavState.BOOK_LIST
     }
 
     /**
+     * Select a session to view its captures.
+     */
+    fun selectSession(sessionId: Long?, sessionName: String? = null) {
+        _selectedSessionId.value = sessionId
+        _selectedSessionName.value = sessionName
+        _libraryNavState.value = if (sessionId != null) LibraryNavState.SESSION_DETAIL else {
+            // Go back to book detail if a book is selected, otherwise book list
+            if (_selectedBookId.value != null) LibraryNavState.BOOK_DETAIL else LibraryNavState.BOOK_LIST
+        }
+    }
+
+    /**
+     * Navigate back one level in the library.
+     */
+    fun navigateBack() {
+        when (_libraryNavState.value) {
+            LibraryNavState.SESSION_DETAIL -> {
+                _selectedSessionId.value = null
+                _selectedSessionName.value = null
+                _libraryNavState.value = if (_selectedBookId.value != null) {
+                    LibraryNavState.BOOK_DETAIL
+                } else {
+                    LibraryNavState.BOOK_LIST
+                }
+            }
+            LibraryNavState.BOOK_DETAIL -> {
+                _selectedBookId.value = null
+                _selectedBookTitle.value = null
+                _libraryNavState.value = LibraryNavState.BOOK_LIST
+            }
+            LibraryNavState.BOOK_LIST -> {
+                // Already at top level
+            }
+        }
+    }
+
+    /**
+     * Reset library navigation to top level.
+     */
+    fun resetLibraryNavigation() {
+        _selectedBookId.value = null
+        _selectedBookTitle.value = null
+        _selectedSessionId.value = null
+        _selectedSessionName.value = null
+        _libraryNavState.value = LibraryNavState.BOOK_LIST
+    }
+
+    // --- Session Management ---
+
+    /**
      * Starts a reading session and the background service.
-     * Logic: Auto-creates book if needed, auto-names session, starts Service.
      */
     fun startSession(title: String) {
         viewModelScope.launch {
-            // 1. Get or Create Book
             val book = dao.getBookByTitle(title)
             val bookId = book?.bookId ?: dao.insertBook(Book(title = title))
 
-            // 2. Auto-naming
             val count = dao.getSessionCountForBook(bookId)
             val displayName = if (count == 0) title else "$title: Session ${count + 1}"
 
-            // 3. Create Session
             dao.insertSession(Session(
                 bookId = bookId,
                 displayName = displayName,
@@ -76,7 +169,6 @@ class SessionViewModel(
                 status = "active"
             ))
 
-            // 4. Trigger the background service using internal application context
             val context = getApplication<Application>()
             val intent = Intent(context, ReadingSessionService::class.java).apply {
                 action = ReadingSessionService.ACTION_START
@@ -92,13 +184,11 @@ class SessionViewModel(
     fun endSession() {
         val current = activeSession.value ?: return
         viewModelScope.launch {
-            // 1. Update Database
             dao.updateSession(current.copy(
                 status = "inactive",
                 endTime = System.currentTimeMillis()
             ))
 
-            // 2. Stop Service
             val context = getApplication<Application>()
             val intent = Intent(context, ReadingSessionService::class.java).apply {
                 action = ReadingSessionService.ACTION_STOP
@@ -106,6 +196,8 @@ class SessionViewModel(
             context.startService(intent)
         }
     }
+
+    // --- Delete Operations ---
 
     /**
      * Deletes a single word entry.
@@ -128,50 +220,70 @@ class SessionViewModel(
     /**
      * Deletes all words with "not found" definitions in the current session.
      */
-    fun deleteUndefinedWords() {
+    fun deleteUndefinedWordsInSession() {
         val sessionId = _selectedSessionId.value ?: return
         viewModelScope.launch {
             dao.deleteUndefinedWords(sessionId)
         }
     }
 
+    // --- Conversion Operations ---
+
     /**
      * Converts a word entry to a quote (keeps the term as quote content).
      */
     fun convertWordToQuote(word: Word) {
         viewModelScope.launch {
-            // Create quote from word
-            dao.insertQuote(
-                Quote(
-                    bookId = word.bookId,
-                    sessionId = word.sessionId,
-                    content = word.term,
-                    timestamp = word.timestamp
+            try {
+                dao.insertQuote(
+                    Quote(
+                        bookId = word.bookId,
+                        sessionId = word.sessionId,
+                        content = word.term,
+                        timestamp = word.timestamp
+                    )
                 )
-            )
-            // Delete the original word
-            dao.deleteWord(word)
+                dao.deleteWord(word)
+            } catch (e: Exception) {
+                // Log error but don't crash
+                android.util.Log.e("SessionViewModel", "Failed to convert word to quote", e)
+            }
         }
     }
 
     /**
-     * Converts a quote entry to a word (will need definition lookup).
-     * For now, just saves with placeholder - user can re-lookup.
+     * Converts a quote entry to a word.
+     * Saves with placeholder definition - needs lookup.
      */
     fun convertQuoteToWord(quote: Quote) {
         viewModelScope.launch {
-            // Create word from quote
-            dao.insertWord(
-                Word(
-                    bookId = quote.bookId,
-                    sessionId = quote.sessionId,
-                    term = quote.content,
-                    definition = "Tap to look up definition",
-                    timestamp = quote.timestamp
+            try {
+                dao.insertWord(
+                    Word(
+                        bookId = quote.bookId,
+                        sessionId = quote.sessionId,
+                        term = quote.content,
+                        definition = "Converted from quote - tap to look up",
+                        timestamp = quote.timestamp
+                    )
                 )
-            )
-            // Delete the original quote
-            dao.deleteQuote(quote)
+                dao.deleteQuote(quote)
+            } catch (e: Exception) {
+                // Log error but don't crash
+                android.util.Log.e("SessionViewModel", "Failed to convert quote to word", e)
+            }
+        }
+    }
+
+    // --- Utility ---
+
+    /**
+     * Get session display name for showing in detail view header.
+     */
+    fun loadSessionName(sessionId: Long) {
+        viewModelScope.launch {
+            val name = dao.getSessionDisplayName(sessionId)
+            _selectedSessionName.value = name
         }
     }
 }

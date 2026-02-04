@@ -38,8 +38,8 @@ fun MainScreen(viewModel: SessionViewModel) {
                 NavigationBarItem(
                     selected = currentRoute == "archive",
                     onClick = {
-                        // Reset the archive drill-down state when entering the tab
-                        viewModel.selectArchiveSession(null)
+                        // Reset the library navigation state when entering the tab
+                        viewModel.resetLibraryNavigation()
                         navController.navigate("archive")
                     },
                     icon = { Icon(Icons.Default.CollectionsBookmark, contentDescription = "Library") },
