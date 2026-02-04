@@ -37,7 +37,9 @@ fun ReviewScreen(viewModel: SessionViewModel) {
             quotes = quotes,
             onDeleteWord = { viewModel.deleteWord(it) },
             onDeleteQuote = { viewModel.deleteQuote(it) },
-            onDeleteUndefinedWords = { viewModel.deleteUndefinedWords() }
+            onDeleteUndefinedWords = { viewModel.deleteUndefinedWords() },
+            onConvertWordToQuote = { viewModel.convertWordToQuote(it) },
+            onConvertQuoteToWord = { viewModel.convertQuoteToWord(it) }
         )
     }
 }

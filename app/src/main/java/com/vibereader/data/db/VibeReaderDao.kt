@@ -75,4 +75,11 @@ interface VibeReaderDao {
 
     @Query("DELETE FROM words WHERE session_id = :sessionId AND definition LIKE '%not found%'")
     suspend fun deleteUndefinedWords(sessionId: Long): Int
+
+    // --- Conversion Queries ---
+    @Query("SELECT * FROM words WHERE word_id = :wordId")
+    suspend fun getWordById(wordId: Long): Word?
+
+    @Query("SELECT * FROM quotes WHERE quote_id = :quoteId")
+    suspend fun getQuoteById(quoteId: Long): Quote?
 }

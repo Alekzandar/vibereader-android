@@ -134,4 +134,44 @@ class SessionViewModel(
             dao.deleteUndefinedWords(sessionId)
         }
     }
+
+    /**
+     * Converts a word entry to a quote (keeps the term as quote content).
+     */
+    fun convertWordToQuote(word: Word) {
+        viewModelScope.launch {
+            // Create quote from word
+            dao.insertQuote(
+                Quote(
+                    bookId = word.bookId,
+                    sessionId = word.sessionId,
+                    content = word.term,
+                    timestamp = word.timestamp
+                )
+            )
+            // Delete the original word
+            dao.deleteWord(word)
+        }
+    }
+
+    /**
+     * Converts a quote entry to a word (will need definition lookup).
+     * For now, just saves with placeholder - user can re-lookup.
+     */
+    fun convertQuoteToWord(quote: Quote) {
+        viewModelScope.launch {
+            // Create word from quote
+            dao.insertWord(
+                Word(
+                    bookId = quote.bookId,
+                    sessionId = quote.sessionId,
+                    term = quote.content,
+                    definition = "Tap to look up definition",
+                    timestamp = quote.timestamp
+                )
+            )
+            // Delete the original quote
+            dao.deleteQuote(quote)
+        }
+    }
 }

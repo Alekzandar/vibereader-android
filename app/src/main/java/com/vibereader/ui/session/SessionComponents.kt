@@ -287,7 +287,7 @@ fun ArchiveListView(sessions: List<SessionWithMetrics>, onSelect: (Long) -> Unit
 /**
  * The drill-down view for a specific session.
  * Lists all words and quotes captured during that specific reading period.
- * Supports swipe-to-delete and bulk delete for undefined words.
+ * Supports swipe-left-to-delete and swipe-right-to-convert.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -297,9 +297,18 @@ fun ArchiveDetailView(
     quotes: List<Quote>,
     onDeleteWord: (Word) -> Unit = {},
     onDeleteQuote: (Quote) -> Unit = {},
-    onDeleteUndefinedWords: () -> Unit = {}
+    onDeleteUndefinedWords: () -> Unit = {},
+    onConvertWordToQuote: (Word) -> Unit = {},
+    onConvertQuoteToWord: (Quote) -> Unit = {}
 ) {
-    val hasUndefinedWords = words.any { it.definition.contains("not found", ignoreCase = true) }
+    val hasUndefinedWords = words.any {
+        it.definition.contains("not found", ignoreCase = true) ||
+        it.definition.contains("Definition not found", ignoreCase = true)
+    }
+    val undefinedCount = words.count {
+        it.definition.contains("not found", ignoreCase = true) ||
+        it.definition.contains("Definition not found", ignoreCase = true)
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
@@ -308,19 +317,47 @@ fun ArchiveDetailView(
                 IconButton(onClick = onBack) {
                     Icon(Icons.Default.ArrowBack, "Back")
                 }
-            },
-            actions = {
-                if (hasUndefinedWords) {
+            }
+        )
+
+        // Clear Undefined banner - more visible
+        if (hasUndefinedWords) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "$undefinedCount undefined word${if (undefinedCount > 1) "s" else ""}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
                     TextButton(
                         onClick = onDeleteUndefinedWords,
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.error
                         )
                     ) {
-                        Text("Clear Undefined")
+                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear All")
                     }
                 }
             }
+        }
+
+        // Swipe hints
+        Text(
+            "Swipe left to delete • Swipe right to convert",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
         LazyColumn(modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -335,19 +372,28 @@ fun ArchiveDetailView(
                 items(words, key = { it.wordId }) { word ->
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = { dismissValue ->
-                            if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
-                                onDeleteWord(word)
-                                true
-                            } else false
+                            when (dismissValue) {
+                                SwipeToDismissBoxValue.EndToStart -> {
+                                    onDeleteWord(word)
+                                    true
+                                }
+                                SwipeToDismissBoxValue.StartToEnd -> {
+                                    onConvertWordToQuote(word)
+                                    true
+                                }
+                                else -> false
+                            }
                         }
                     )
 
                     SwipeToDismissBox(
                         state = dismissState,
                         backgroundContent = {
+                            val direction = dismissState.targetValue
                             val color by animateColorAsState(
-                                when (dismissState.targetValue) {
+                                when (direction) {
                                     SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
+                                    SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.tertiary
                                     else -> Color.Transparent
                                 },
                                 label = "swipe-color"
@@ -356,20 +402,36 @@ fun ArchiveDetailView(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .background(color, RoundedCornerShape(12.dp))
-                                    .padding(horizontal = 20.dp),
-                                contentAlignment = Alignment.CenterEnd
+                                    .padding(horizontal = 20.dp)
                             ) {
+                                // Delete icon on right
                                 Icon(
                                     Icons.Default.Delete,
                                     contentDescription = "Delete",
-                                    tint = Color.White
+                                    tint = Color.White,
+                                    modifier = Modifier.align(Alignment.CenterEnd)
                                 )
+                                // Convert icon on left
+                                Row(
+                                    modifier = Modifier.align(Alignment.CenterStart),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.FormatQuote,
+                                        contentDescription = "Convert to Quote",
+                                        tint = Color.White
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Quote", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                }
                             }
                         },
-                        enableDismissFromStartToEnd = false,
+                        enableDismissFromStartToEnd = true,
+                        enableDismissFromEndToStart = true,
                         modifier = Modifier.padding(vertical = 4.dp)
                     ) {
-                        val isUndefined = word.definition.contains("not found", ignoreCase = true)
+                        val isUndefined = word.definition.contains("not found", ignoreCase = true) ||
+                                word.definition.contains("Definition not found", ignoreCase = true)
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = if (isUndefined) CardDefaults.cardColors(
@@ -415,19 +477,28 @@ fun ArchiveDetailView(
                 items(quotes, key = { it.quoteId }) { quote ->
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = { dismissValue ->
-                            if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
-                                onDeleteQuote(quote)
-                                true
-                            } else false
+                            when (dismissValue) {
+                                SwipeToDismissBoxValue.EndToStart -> {
+                                    onDeleteQuote(quote)
+                                    true
+                                }
+                                SwipeToDismissBoxValue.StartToEnd -> {
+                                    onConvertQuoteToWord(quote)
+                                    true
+                                }
+                                else -> false
+                            }
                         }
                     )
 
                     SwipeToDismissBox(
                         state = dismissState,
                         backgroundContent = {
+                            val direction = dismissState.targetValue
                             val color by animateColorAsState(
-                                when (dismissState.targetValue) {
+                                when (direction) {
                                     SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
+                                    SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.primary
                                     else -> Color.Transparent
                                 },
                                 label = "swipe-color"
@@ -436,17 +507,32 @@ fun ArchiveDetailView(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .background(color, RoundedCornerShape(12.dp))
-                                    .padding(horizontal = 20.dp),
-                                contentAlignment = Alignment.CenterEnd
+                                    .padding(horizontal = 20.dp)
                             ) {
+                                // Delete icon on right
                                 Icon(
                                     Icons.Default.Delete,
                                     contentDescription = "Delete",
-                                    tint = Color.White
+                                    tint = Color.White,
+                                    modifier = Modifier.align(Alignment.CenterEnd)
                                 )
+                                // Convert icon on left
+                                Row(
+                                    modifier = Modifier.align(Alignment.CenterStart),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Translate,
+                                        contentDescription = "Convert to Word",
+                                        tint = Color.White
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Define", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                }
                             }
                         },
-                        enableDismissFromStartToEnd = false,
+                        enableDismissFromStartToEnd = true,
+                        enableDismissFromEndToStart = true,
                         modifier = Modifier.padding(vertical = 4.dp)
                     ) {
                         Card(modifier = Modifier.fillMaxWidth()) {
