@@ -42,8 +42,8 @@ fun MainScreen(viewModel: SessionViewModel) {
                         viewModel.selectArchiveSession(null)
                         navController.navigate("archive")
                     },
-                    icon = { Icon(Icons.Default.CollectionsBookmark, contentDescription = "Archive") },
-                    label = { Text("Archive") }
+                    icon = { Icon(Icons.Default.CollectionsBookmark, contentDescription = "Library") },
+                    label = { Text("Library") }
                 )
             }
         }

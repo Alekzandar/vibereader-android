@@ -1,6 +1,7 @@
 package com.vibereader.ui.session
 
 import android.content.Intent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -286,16 +287,38 @@ fun ArchiveListView(sessions: List<SessionWithMetrics>, onSelect: (Long) -> Unit
 /**
  * The drill-down view for a specific session.
  * Lists all words and quotes captured during that specific reading period.
+ * Supports swipe-to-delete and bulk delete for undefined words.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ArchiveDetailView(onBack: () -> Unit, words: List<Word>, quotes: List<Quote>) {
+fun ArchiveDetailView(
+    onBack: () -> Unit,
+    words: List<Word>,
+    quotes: List<Quote>,
+    onDeleteWord: (Word) -> Unit = {},
+    onDeleteQuote: (Quote) -> Unit = {},
+    onDeleteUndefinedWords: () -> Unit = {}
+) {
+    val hasUndefinedWords = words.any { it.definition.contains("not found", ignoreCase = true) }
+
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Session Highlights") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.Default.ArrowBack, "Back")
+                }
+            },
+            actions = {
+                if (hasUndefinedWords) {
+                    TextButton(
+                        onClick = onDeleteUndefinedWords,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Clear Undefined")
+                    }
                 }
             }
         )
@@ -309,34 +332,74 @@ fun ArchiveDetailView(onBack: () -> Unit, words: List<Word>, quotes: List<Quote>
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
                 }
-                items(words) { word ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    word.term,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                            },
-                            supportingContent = {
-                                Text(
-                                    word.definition,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontStyle = FontStyle.Italic
-                                )
-                            },
-                            leadingContent = {
+                items(words, key = { it.wordId }) { word ->
+                    val dismissState = rememberSwipeToDismissBoxState(
+                        confirmValueChange = { dismissValue ->
+                            if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
+                                onDeleteWord(word)
+                                true
+                            } else false
+                        }
+                    )
+
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        backgroundContent = {
+                            val color by animateColorAsState(
+                                when (dismissState.targetValue) {
+                                    SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
+                                    else -> Color.Transparent
+                                },
+                                label = "swipe-color"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(color, RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
                                 Icon(
-                                    Icons.Default.Translate,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete",
+                                    tint = Color.White
                                 )
                             }
-                        )
+                        },
+                        enableDismissFromStartToEnd = false,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        val isUndefined = word.definition.contains("not found", ignoreCase = true)
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = if (isUndefined) CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                            ) else CardDefaults.cardColors()
+                        ) {
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        word.term,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(
+                                        word.definition,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontStyle = FontStyle.Italic,
+                                        color = if (isUndefined) MaterialTheme.colorScheme.error else Color.Unspecified
+                                    )
+                                },
+                                leadingContent = {
+                                    Icon(
+                                        if (isUndefined) Icons.Default.ErrorOutline else Icons.Default.Translate,
+                                        null,
+                                        tint = if (isUndefined) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -349,28 +412,61 @@ fun ArchiveDetailView(onBack: () -> Unit, words: List<Word>, quotes: List<Quote>
                         modifier = Modifier.padding(top = 20.dp, bottom = 12.dp)
                     )
                 }
-                items(quotes) { quote ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    "\"${quote.content}\"",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontStyle = FontStyle.Italic
-                                )
-                            },
-                            leadingContent = {
+                items(quotes, key = { it.quoteId }) { quote ->
+                    val dismissState = rememberSwipeToDismissBoxState(
+                        confirmValueChange = { dismissValue ->
+                            if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
+                                onDeleteQuote(quote)
+                                true
+                            } else false
+                        }
+                    )
+
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        backgroundContent = {
+                            val color by animateColorAsState(
+                                when (dismissState.targetValue) {
+                                    SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
+                                    else -> Color.Transparent
+                                },
+                                label = "swipe-color"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(color, RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
                                 Icon(
-                                    Icons.Default.FormatQuote,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.secondary
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete",
+                                    tint = Color.White
                                 )
                             }
-                        )
+                        },
+                        enableDismissFromStartToEnd = false,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        "\"${quote.content}\"",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontStyle = FontStyle.Italic
+                                    )
+                                },
+                                leadingContent = {
+                                    Icon(
+                                        Icons.Default.FormatQuote,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            )
+                        }
                     }
                 }
             }

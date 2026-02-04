@@ -7,7 +7,7 @@ import com.vibereader.ui.session.ArchiveListView
 import com.vibereader.ui.session.ArchiveDetailView
 
 /**
- * ReviewScreen handles the "Archive" tab logic.
+ * ReviewScreen handles the "Library" tab logic.
  * It uses the ViewModel to toggle between the list of past sessions
  * and the "drill-down" detail view of a specific session's captures.
  */
@@ -34,7 +34,10 @@ fun ReviewScreen(viewModel: SessionViewModel) {
         ArchiveDetailView(
             onBack = { viewModel.selectArchiveSession(null) },
             words = words,
-            quotes = quotes
+            quotes = quotes,
+            onDeleteWord = { viewModel.deleteWord(it) },
+            onDeleteQuote = { viewModel.deleteQuote(it) },
+            onDeleteUndefinedWords = { viewModel.deleteUndefinedWords() }
         )
     }
 }

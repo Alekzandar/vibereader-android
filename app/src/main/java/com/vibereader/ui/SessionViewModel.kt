@@ -106,4 +106,32 @@ class SessionViewModel(
             context.startService(intent)
         }
     }
+
+    /**
+     * Deletes a single word entry.
+     */
+    fun deleteWord(word: Word) {
+        viewModelScope.launch {
+            dao.deleteWord(word)
+        }
+    }
+
+    /**
+     * Deletes a single quote entry.
+     */
+    fun deleteQuote(quote: Quote) {
+        viewModelScope.launch {
+            dao.deleteQuote(quote)
+        }
+    }
+
+    /**
+     * Deletes all words with "not found" definitions in the current session.
+     */
+    fun deleteUndefinedWords() {
+        val sessionId = _selectedSessionId.value ?: return
+        viewModelScope.launch {
+            dao.deleteUndefinedWords(sessionId)
+        }
+    }
 }

@@ -15,7 +15,10 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +32,8 @@ import com.vibereader.data.db.AppDatabase
 import com.vibereader.data.db.Quote
 import com.vibereader.data.db.Word
 import com.vibereader.data.network.RetrofitClient
+import com.vibereader.data.network.WikipediaClient
+import retrofit2.HttpException
 import com.vibereader.ui.theme.VibeReaderTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -92,19 +97,44 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         startListening()
     }
 
+    /**
+     * Called when activity is relaunched with FLAG_ACTIVITY_SINGLE_TOP.
+     * Must reset state and restart listening.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        Log.d("SpeechCapture", "onNewIntent - restarting capture")
+
+        // Update capture mode from new intent
+        captureMode = when (intent.action) {
+            "ACTION_DEFINE" -> CaptureMode.DEFINE_WORD
+            "ACTION_QUOTE" -> CaptureMode.SAVE_QUOTE
+            ReadingSessionService.ACTION_SMART_CAPTURE -> CaptureMode.SMART_CAPTURE
+            else -> CaptureMode.SMART_CAPTURE
+        }
+
+        // Reset state and start listening again
+        startListening()
+    }
+
     private fun setupLockScreenVisibility() {
+        // Multiple approaches for maximum compatibility
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
             val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
             km.requestDismissKeyguard(this, null)
-        } else {
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            )
         }
+
+        // Also set window flags for older devices and as backup
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                    WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
+        )
     }
 
     @Composable
@@ -166,17 +196,45 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 }
 
                 CaptureState.VERIFYING -> {
+                    // Editable text field for manual correction
                     Text(
                         "I heard:",
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White.copy(alpha = 0.7f)
                     )
                     Spacer(Modifier.height(8.dp))
+
+                    // Editable text field
+                    var editableText by remember(sText) { mutableStateOf(sText) }
+                    BasicTextField(
+                        value = editableText,
+                        onValueChange = {
+                            editableText = it
+                            spokenText.value = it
+                            // Re-detect mode based on word count
+                            val wordCount = it.trim().split("\\s+".toRegex()).size
+                            detectedMode.value = if (wordCount <= 2) CaptureMode.DEFINE_WORD else CaptureMode.SAVE_QUOTE
+                        },
+                        textStyle = MaterialTheme.typography.headlineSmall.copy(
+                            color = Color.White,
+                            textAlign = TextAlign.Center
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(16.dp),
+                        decorationBox = { innerTextField ->
+                            Box(contentAlignment = Alignment.Center) {
+                                innerTextField()
+                            }
+                        }
+                    )
+
                     Text(
-                        "\"$sText\"",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White,
-                        textAlign = TextAlign.Center
+                        "Tap to edit",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(top = 4.dp)
                     )
 
                     if (detected != null) {
@@ -188,11 +246,19 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         )
                     }
 
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(24.dp))
+
+                    // Primary action row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
                     ) {
+                        OutlinedButton(
+                            onClick = { finish() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.7f))
+                        ) {
+                            Text("Cancel")
+                        }
                         OutlinedButton(
                             onClick = { startListening() },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
@@ -200,7 +266,28 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             Text("Retry")
                         }
                         Button(onClick = { confirmCapture() }) {
-                            Text("Confirm")
+                            Text(if (detected == CaptureMode.SAVE_QUOTE) "Save Quote" else "Define")
+                        }
+                    }
+
+                    // Secondary action: "Define This Instead" - only show for quotes
+                    if (detected == CaptureMode.SAVE_QUOTE) {
+                        Spacer(Modifier.height(20.dp))
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.2f),
+                            modifier = Modifier.padding(horizontal = 32.dp)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "or",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.5f)
+                        )
+                        TextButton(
+                            onClick = { defineInstead() },
+                            colors = ButtonDefaults.textButtonColors(contentColor = Color.White.copy(alpha = 0.8f))
+                        ) {
+                            Text("Define This Instead")
                         }
                     }
                 }
@@ -336,22 +423,71 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * User chose to define the phrase instead of saving as quote.
+     * Switches mode and triggers definition lookup.
+     */
+    private fun defineInstead() {
+        detectedMode.value = CaptureMode.DEFINE_WORD
+        defineWord(spokenText.value)
+    }
+
     private fun defineWord(term: String) {
         uiState.value = CaptureState.DEFINING
         lifecycleScope.launch {
-            try {
-                val response = RetrofitClient.instance.getDefinition(term.lowercase().trim())
-                val meaning = response.firstOrNull()?.meanings?.firstOrNull()
-                val def = meaning?.definitions?.firstOrNull()?.definition ?: "No definition found."
-                val partOfSpeech = meaning?.partOfSpeech ?: "unknown"
-                val formatted = "($partOfSpeech) $def"
-                definitionText.value = formatted
-                saveWord(term, formatted)
-            } catch (e: Exception) {
-                Log.e("SpeechCapture", "Definition lookup failed", e)
-                definitionText.value = "Definition not found."
-                saveWord(term, "Definition not found.")
+            val cleanTerm = term.lowercase().trim()
+
+            // Try Dictionary API first (with and without articles)
+            val termsToTry = listOf(
+                cleanTerm,
+                cleanTerm.removePrefix("the ").removePrefix("a ").removePrefix("an ")
+            ).distinct()
+
+            for (searchTerm in termsToTry) {
+                try {
+                    val response = RetrofitClient.instance.getDefinition(searchTerm)
+                    val meaning = response.firstOrNull()?.meanings?.firstOrNull()
+                    val def = meaning?.definitions?.firstOrNull()?.definition
+
+                    if (def != null) {
+                        val partOfSpeech = meaning.partOfSpeech ?: "unknown"
+                        val formatted = "($partOfSpeech) $def"
+                        definitionText.value = formatted
+                        saveWord(term, formatted)
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    Log.d("SpeechCapture", "Dictionary API failed for '$searchTerm': ${e.message}")
+                }
             }
+
+            // Fallback to Wikipedia API - try multiple search variations
+            val wikiTermsToTry = termsToTry.map { it.replace(" ", "_") }
+
+            for (wikiTerm in wikiTermsToTry) {
+                try {
+                    Log.d("SpeechCapture", "Trying Wikipedia for: $wikiTerm")
+                    val wikiResponse = WikipediaClient.instance.getSummary(wikiTerm)
+                    val summary = wikiResponse.description
+                        ?: wikiResponse.extract.take(200) + if (wikiResponse.extract.length > 200) "..." else ""
+
+                    definitionText.value = "(Wikipedia) $summary"
+                    saveWord(term, "(Wikipedia) $summary")
+                    return@launch
+                } catch (e: HttpException) {
+                    if (e.code() == 404) {
+                        Log.d("SpeechCapture", "Wikipedia page not found for '$wikiTerm'")
+                    } else {
+                        Log.e("SpeechCapture", "Wikipedia API error for '$wikiTerm'", e)
+                    }
+                } catch (e: Exception) {
+                    Log.e("SpeechCapture", "Wikipedia API failed for '$wikiTerm'", e)
+                }
+            }
+
+            // All attempts failed
+            definitionText.value = "No definition found for '$term'"
+            saveWord(term, "No definition found.")
         }
     }
 
@@ -424,6 +560,17 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale.getDefault()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Cancel any ongoing speech recognition when activity goes to background
+        try {
+            speechRecognizer.stopListening()
+            speechRecognizer.cancel()
+        } catch (e: Exception) {
+            Log.d("SpeechCapture", "Error stopping speech recognizer: ${e.message}")
         }
     }
 

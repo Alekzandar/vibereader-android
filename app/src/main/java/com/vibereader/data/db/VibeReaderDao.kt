@@ -65,4 +65,14 @@ interface VibeReaderDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertQuote(quote: Quote)
+
+    // --- Delete Queries ---
+    @Delete
+    suspend fun deleteWord(word: Word)
+
+    @Delete
+    suspend fun deleteQuote(quote: Quote)
+
+    @Query("DELETE FROM words WHERE session_id = :sessionId AND definition LIKE '%not found%'")
+    suspend fun deleteUndefinedWords(sessionId: Long): Int
 }
