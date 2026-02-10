@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibereader.ReadingSessionService
 import com.vibereader.data.db.*
+import com.vibereader.data.models.WeeklyVibe
 import com.vibereader.ui.SpeechCaptureActivity
 import java.text.SimpleDateFormat
 import java.util.*
@@ -231,15 +232,32 @@ fun ActiveSessionView(sessionName: String, onEnd: () -> Unit) {
 // ============================================================================
 
 /**
+ * Enum representing the state of the vibe generation button.
+ */
+enum class VibeButtonState {
+    CAN_GENERATE,    // Normal button: "Generate Weekly Vibe"
+    GENERATING,      // Disabled + spinner: "Generating..."
+    UP_TO_DATE,      // Muted/outline: "Vibe is current"
+    NO_DATA          // Disabled: "Start reading to unlock"
+}
+
+/**
  * Library view showing books with their sessions as pills.
  * Tap book card → Book Detail; Tap session pill → Session Detail.
+ * Includes Weekly Vibe AI feature at the top.
  */
 @Composable
 fun LibraryView(
     books: List<BookWithMetrics>,
     recentSessionsByBook: Map<Long, List<SessionSummary>>,
     onBookClick: (bookId: Long, bookTitle: String) -> Unit,
-    onSessionClick: (sessionId: Long, sessionName: String) -> Unit
+    onSessionClick: (sessionId: Long, sessionName: String) -> Unit,
+    weeklyVibe: WeeklyVibe? = null,
+    isGeneratingVibe: Boolean = false,
+    vibeError: String? = null,
+    canGenerateVibe: Boolean = true,
+    onGenerateVibe: () -> Unit = {},
+    onSeedTestData: () -> Unit = {}
 ) {
     LazyColumn(
         modifier = Modifier
@@ -252,6 +270,21 @@ fun LibraryView(
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
+        }
+
+        // Weekly Vibe Section
+        item {
+            WeeklyVibeSection(
+                weeklyVibe = weeklyVibe,
+                isGenerating = isGeneratingVibe,
+                error = vibeError,
+                canGenerate = canGenerateVibe,
+                hasData = books.isNotEmpty(),
+                onGenerateClick = onGenerateVibe,
+                onSeedClick = onSeedTestData,
+                showSeedButton = books.isEmpty()
+            )
+            Spacer(Modifier.height(16.dp))
         }
 
         if (books.isEmpty()) {
@@ -294,6 +327,330 @@ fun LibraryView(
                 onSessionClick = onSessionClick
             )
         }
+    }
+}
+
+// ============================================================================
+// Weekly Vibe Components
+// ============================================================================
+
+/**
+ * Section containing the Weekly Vibe button and card.
+ */
+@Composable
+fun WeeklyVibeSection(
+    weeklyVibe: WeeklyVibe?,
+    isGenerating: Boolean,
+    error: String?,
+    canGenerate: Boolean,
+    hasData: Boolean,
+    onGenerateClick: () -> Unit,
+    onSeedClick: () -> Unit = {},
+    showSeedButton: Boolean = false
+) {
+    // Determine button state
+    val buttonState = when {
+        isGenerating -> VibeButtonState.GENERATING
+        !hasData -> VibeButtonState.NO_DATA
+        !canGenerate && weeklyVibe != null -> VibeButtonState.UP_TO_DATE
+        else -> VibeButtonState.CAN_GENERATE
+    }
+
+    Column {
+        // Generate button with different states
+        when (buttonState) {
+            VibeButtonState.GENERATING -> {
+                Button(
+                    onClick = { },
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onTertiary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Generating...")
+                }
+            }
+            VibeButtonState.UP_TO_DATE -> {
+                OutlinedButton(
+                    onClick = { },
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Vibe is current", color = MaterialTheme.colorScheme.outline)
+                }
+            }
+            VibeButtonState.NO_DATA -> {
+                OutlinedButton(
+                    onClick = { },
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Start reading to unlock", color = MaterialTheme.colorScheme.outline)
+                }
+            }
+            VibeButtonState.CAN_GENERATE -> {
+                Button(
+                    onClick = onGenerateClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Generate Weekly Vibe")
+                }
+            }
+        }
+
+        // Seed test data button (only show when library is empty)
+        if (showSeedButton) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onSeedClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    Icons.Default.Science,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Seed Test Data (Debug)")
+            }
+        }
+
+        // Error message
+        if (error != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
+
+        // Vibe card
+        if (weeklyVibe != null) {
+            Spacer(Modifier.height(12.dp))
+            WeeklyVibeCard(vibe = weeklyVibe)
+        }
+    }
+}
+
+/**
+ * Wrapped-style card displaying the generated Weekly Vibe.
+ */
+@Composable
+fun WeeklyVibeCard(vibe: WeeklyVibe) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header: Emoji + Title
+            VibeHeader(emoji = vibe.vibeEmoji, title = vibe.vibeTitle)
+
+            // Theme chips
+            if (vibe.themeTags.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                ThemeChips(tags = vibe.themeTags)
+            }
+
+            // Insight nuggets
+            if (vibe.insightNuggets.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                InsightList(insights = vibe.insightNuggets)
+            }
+
+            // Spotlights
+            if (vibe.wordSpotlight.isNotEmpty() || vibe.quoteSpotlight.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                SpotlightSection(
+                    wordSpotlight = vibe.wordSpotlight,
+                    quoteSpotlight = vibe.quoteSpotlight
+                )
+            }
+
+            // Footer stats
+            Spacer(Modifier.height(12.dp))
+            VibeFooter(
+                sessionCount = vibe.sessionCount,
+                bookCount = vibe.bookTitles.size,
+                dayCount = 7
+            )
+        }
+    }
+}
+
+/**
+ * Header showing big emoji and vibe title.
+ */
+@Composable
+private fun VibeHeader(emoji: String, title: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = emoji,
+            fontSize = 32.sp
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+    }
+}
+
+/**
+ * Horizontal row of theme tag chips.
+ */
+@Composable
+private fun ThemeChips(tags: List<String>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        tags.forEach { tag ->
+            SuggestionChip(
+                onClick = { },
+                label = { Text(tag, style = MaterialTheme.typography.labelMedium) },
+                colors = SuggestionChipDefaults.suggestionChipColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    labelColor = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            )
+        }
+    }
+}
+
+/**
+ * Bullet point list of insight nuggets.
+ */
+@Composable
+private fun InsightList(insights: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        insights.forEach { insight ->
+            Row(verticalAlignment = Alignment.Top) {
+                Text(
+                    text = "•",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                Text(
+                    text = insight,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Section showing word and quote spotlights.
+ */
+@Composable
+private fun SpotlightSection(wordSpotlight: String, quoteSpotlight: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            if (wordSpotlight.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "✨",
+                        fontSize = 14.sp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Word: ",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        text = wordSpotlight,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+            if (wordSpotlight.isNotEmpty() && quoteSpotlight.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+            }
+            if (quoteSpotlight.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        text = "💬",
+                        fontSize = 14.sp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "\"${quoteSpotlight}\"",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontStyle = FontStyle.Italic,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Footer showing session/book/day stats.
+ */
+@Composable
+private fun VibeFooter(sessionCount: Int, bookCount: Int, dayCount: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "$sessionCount sessions · $bookCount books · $dayCount days",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
+        )
     }
 }
 
@@ -372,6 +729,7 @@ fun SessionPill(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
+        shadowElevation = 2.dp,
         modifier = Modifier.width(72.dp)
     ) {
         Column(
@@ -462,7 +820,7 @@ fun BookDetailView(
                 )
             }
 
-            items(sessions, key = { it.session.sessionId }) { sessionWithMetrics ->
+            items(sessions, key = { "session_${it.session.sessionId}" }) { sessionWithMetrics ->
                 SessionRow(
                     session = sessionWithMetrics,
                     onClick = { onSessionClick(sessionWithMetrics.session.sessionId, sessionWithMetrics.session.displayName) }
@@ -480,7 +838,7 @@ fun BookDetailView(
                     )
                 }
 
-                items(words.take(10), key = { it.wordId }) { word ->
+                items(words.take(10), key = { "word_${it.wordId}" }) { word ->
                     WordRowWithSessionTag(
                         word = word,
                         sessionName = sessionNames[word.sessionId]?.substringAfterLast(": ") ?: ""
@@ -510,7 +868,7 @@ fun BookDetailView(
                     )
                 }
 
-                items(quotes.take(10), key = { it.quoteId }) { quote ->
+                items(quotes.take(10), key = { "quote_${it.quoteId}" }) { quote ->
                     QuoteRowWithSessionTag(
                         quote = quote,
                         sessionName = sessionNames[quote.sessionId]?.substringAfterLast(": ") ?: ""
@@ -544,7 +902,8 @@ fun SessionRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .clickable { onClick() }
+            .clickable { onClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier
@@ -565,10 +924,17 @@ fun SessionRow(
                     color = Color.Gray
                 )
             }
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 MetricsBadge("${session.wordCount}W", Color(0xFFBBDEFB))
                 Spacer(Modifier.width(4.dp))
                 MetricsBadge("${session.quoteCount}Q", Color(0xFFC8E6C9))
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = "View session",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -684,7 +1050,8 @@ fun SessionDetailView(
     onDeleteQuote: (Quote) -> Unit,
     onDeleteUndefinedWords: () -> Unit,
     onConvertWordToQuote: (Word) -> Unit,
-    onConvertQuoteToWord: (Quote) -> Unit
+    onConvertQuoteToWord: (Quote) -> Unit,
+    onRelookupWord: (Word) -> Unit = {}
 ) {
     // Delete confirmation state
     var showDeleteConfirmation by remember { mutableStateOf(false) }
@@ -793,14 +1160,15 @@ fun SessionDetailView(
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
                 }
-                items(words, key = { it.wordId }) { word ->
+                items(words, key = { "word_${it.wordId}" }) { word ->
                     SwipeableWordItem(
                         word = word,
                         onDelete = {
                             pendingDeleteWord = word
                             showDeleteConfirmation = true
                         },
-                        onConvert = { onConvertWordToQuote(word) }
+                        onConvert = { onConvertWordToQuote(word) },
+                        onRelookup = { onRelookupWord(word) }
                     )
                 }
             }
@@ -813,7 +1181,7 @@ fun SessionDetailView(
                         modifier = Modifier.padding(top = 20.dp, bottom = 12.dp)
                     )
                 }
-                items(quotes, key = { it.quoteId }) { quote ->
+                items(quotes, key = { "quote_${it.quoteId}" }) { quote ->
                     SwipeableQuoteItem(
                         quote = quote,
                         onDelete = {
@@ -866,7 +1234,8 @@ private fun isUndefinedWord(word: Word): Boolean {
 fun SwipeableWordItem(
     word: Word,
     onDelete: () -> Unit,
-    onConvert: () -> Unit
+    onConvert: () -> Unit,
+    onRelookup: () -> Unit = {}
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
@@ -883,6 +1252,8 @@ fun SwipeableWordItem(
             }
         }
     )
+
+    val isUndefined = isUndefinedWord(word)
 
     SwipeToDismissBox(
         state = dismissState,
@@ -922,9 +1293,12 @@ fun SwipeableWordItem(
         enableDismissFromEndToStart = true,
         modifier = Modifier.padding(vertical = 4.dp)
     ) {
-        val isUndefined = isUndefinedWord(word)
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isUndefined) Modifier.clickable { onRelookup() } else Modifier
+                ),
             colors = if (isUndefined) CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
             ) else CardDefaults.cardColors()
@@ -934,12 +1308,22 @@ fun SwipeableWordItem(
                     Text(word.term, style = MaterialTheme.typography.titleMedium)
                 },
                 supportingContent = {
-                    Text(
-                        word.definition,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontStyle = FontStyle.Italic,
-                        color = if (isUndefined) MaterialTheme.colorScheme.error else Color.Unspecified
-                    )
+                    Column {
+                        Text(
+                            word.definition,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontStyle = FontStyle.Italic,
+                            color = if (isUndefined) MaterialTheme.colorScheme.error else Color.Unspecified
+                        )
+                        if (isUndefined) {
+                            Text(
+                                "Tap to look up",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
                 },
                 leadingContent = {
                     Icon(

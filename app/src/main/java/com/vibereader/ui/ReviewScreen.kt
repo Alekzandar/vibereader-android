@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import com.vibereader.data.db.SessionSummary
+import kotlinx.coroutines.launch
 import com.vibereader.ui.session.BookDetailView
 import com.vibereader.ui.session.LibraryView
 import com.vibereader.ui.session.SessionDetailView
@@ -34,17 +35,26 @@ fun ReviewScreen(viewModel: SessionViewModel) {
     val wordsForSession by viewModel.wordsForSelectedSession.collectAsState()
     val quotesForSession by viewModel.quotesForSelectedSession.collectAsState()
 
+    // Weekly Vibe state
+    val weeklyVibe by viewModel.weeklyVibe.collectAsState()
+    val isGeneratingVibe by viewModel.isGeneratingVibe.collectAsState()
+    val vibeError by viewModel.vibeError.collectAsState()
+    val canGenerateVibe by viewModel.canGenerateVibe.collectAsState()
+
     // Collect recent sessions for each book (for session pills)
     val recentSessionsByBook = remember { mutableStateMapOf<Long, List<SessionSummary>>() }
 
     // Load recent sessions for each book when books list changes
+    // Each book gets its own coroutine so collections run in parallel
     LaunchedEffect(books) {
         books.forEach { bookWithMetrics ->
-            viewModel.database.vibeReaderDao()
-                .getRecentSessionsForBook(bookWithMetrics.book.bookId, 5)
-                .collect { sessions ->
-                    recentSessionsByBook[bookWithMetrics.book.bookId] = sessions
-                }
+            launch {
+                viewModel.database.vibeReaderDao()
+                    .getRecentSessionsForBook(bookWithMetrics.book.bookId, 5)
+                    .collect { sessions ->
+                        recentSessionsByBook[bookWithMetrics.book.bookId] = sessions
+                    }
+            }
         }
     }
 
@@ -58,7 +68,13 @@ fun ReviewScreen(viewModel: SessionViewModel) {
                 },
                 onSessionClick = { sessionId, sessionName ->
                     viewModel.selectSession(sessionId, sessionName)
-                }
+                },
+                weeklyVibe = weeklyVibe,
+                isGeneratingVibe = isGeneratingVibe,
+                vibeError = vibeError,
+                canGenerateVibe = canGenerateVibe,
+                onGenerateVibe = { viewModel.generateWeeklyVibe() },
+                onSeedTestData = { viewModel.seedTestData() }
             )
         }
 
@@ -85,7 +101,8 @@ fun ReviewScreen(viewModel: SessionViewModel) {
                 onDeleteQuote = { viewModel.deleteQuote(it) },
                 onDeleteUndefinedWords = { viewModel.deleteUndefinedWordsInSession() },
                 onConvertWordToQuote = { viewModel.convertWordToQuote(it) },
-                onConvertQuoteToWord = { viewModel.convertQuoteToWord(it) }
+                onConvertQuoteToWord = { viewModel.convertQuoteToWord(it) },
+                onRelookupWord = { viewModel.relookupWord(it) }
             )
         }
     }

@@ -58,6 +58,7 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val spokenText = mutableStateOf("")
     private val definitionText = mutableStateOf("")
     private val detectedMode = mutableStateOf<CaptureMode?>(null)
+    private val autoDismissActive = mutableStateOf(true)
 
     private enum class CaptureState { LISTENING, VERIFYING, SAVING, DEFINING, SUCCESS, ERROR }
     enum class CaptureMode { SAVE_QUOTE, DEFINE_WORD, SMART_CAPTURE }
@@ -168,22 +169,22 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 CaptureState.LISTENING -> {
                     CircularProgressIndicator(
                         color = Color.White,
-                        modifier = Modifier.size(64.dp),
-                        strokeWidth = 4.dp
+                        modifier = Modifier.size(80.dp),
+                        strokeWidth = 5.dp
                     )
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(32.dp))
                     Text(
                         "Listening...",
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.headlineLarge,
                         color = Color.White
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
                     Text(
                         if (captureMode == CaptureMode.SMART_CAPTURE)
                             "Say a word to define, or a phrase to quote"
                         else
                             "Speak now",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = Color.White.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center
                     )
@@ -199,10 +200,10 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     // Editable text field for manual correction
                     Text(
                         "I heard:",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleLarge,
                         color = Color.White.copy(alpha = 0.7f)
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
 
                     // Editable text field
                     var editableText by remember(sText) { mutableStateOf(sText) }
@@ -215,7 +216,7 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             val wordCount = it.trim().split("\\s+".toRegex()).size
                             detectedMode.value = if (wordCount <= 2) CaptureMode.DEFINE_WORD else CaptureMode.SAVE_QUOTE
                         },
-                        textStyle = MaterialTheme.typography.headlineSmall.copy(
+                        textStyle = MaterialTheme.typography.headlineMedium.copy(
                             color = Color.White,
                             textAlign = TextAlign.Center
                         ),
@@ -294,29 +295,58 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                 CaptureState.DEFINING -> {
                     if (dText.isEmpty()) {
-                        CircularProgressIndicator(color = Color.White)
-                        Spacer(Modifier.height(16.dp))
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(64.dp))
+                        Spacer(Modifier.height(24.dp))
                         Text(
                             "Defining '$sText'...",
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.titleLarge,
                             color = Color.White
                         )
                     } else {
+                        val dismissActive by remember { autoDismissActive }
+                        var countdown by remember { mutableIntStateOf(5) }
+
+                        if (dismissActive) {
+                            LaunchedEffect(Unit) {
+                                while (countdown > 0) {
+                                    kotlinx.coroutines.delay(1000)
+                                    countdown--
+                                }
+                                finish()
+                            }
+                        }
+
                         Text(
                             sText,
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = MaterialTheme.typography.headlineLarge,
                             color = Color.White
                         )
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(20.dp))
                         Text(
                             dText,
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             color = Color.White.copy(alpha = 0.9f),
                             textAlign = TextAlign.Center
                         )
                         Spacer(Modifier.height(32.dp))
-                        Button(onClick = { finish() }) {
-                            Text("Done")
+
+                        if (dismissActive) {
+                            Text(
+                                "Closing in ${countdown}s",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.5f)
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = { autoDismissActive.value = false },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Text("Keep Open")
+                            }
+                        } else {
+                            Button(onClick = { finish() }) {
+                                Text("Done")
+                            }
                         }
                     }
                 }
@@ -330,7 +360,7 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     Spacer(Modifier.height(16.dp))
                     Text(
                         "Saved!",
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.headlineMedium,
                         color = Color.White
                     )
                 }
@@ -338,7 +368,7 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 CaptureState.ERROR -> {
                     Text(
                         "Could not capture speech",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.error
                     )
                     Spacer(Modifier.height(24.dp))
@@ -365,6 +395,7 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         spokenText.value = ""
         definitionText.value = ""
         detectedMode.value = null
+        autoDismissActive.value = true
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -396,8 +427,8 @@ class SpeechCaptureActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 if (wordCount <= 2) {
                     // 1-2 words = probably a word to define
                     detectedMode.value = CaptureMode.DEFINE_WORD
-                    // Still verify first in smart mode
-                    uiState.value = CaptureState.VERIFYING
+                    // Skip verification for words — go straight to define
+                    defineWord(text)
                 } else {
                     // 3+ words = probably a quote
                     detectedMode.value = CaptureMode.SAVE_QUOTE

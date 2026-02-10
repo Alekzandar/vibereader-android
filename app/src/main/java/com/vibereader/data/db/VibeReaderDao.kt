@@ -63,6 +63,12 @@ interface VibeReaderDao {
     fun getActiveSession(): Flow<Session?>
 
     /**
+     * Synchronous active session check for TileService.
+     */
+    @Query("SELECT * FROM sessions WHERE status = 'active' LIMIT 1")
+    suspend fun getActiveSessionSync(): Session?
+
+    /**
      * The "Archive" Query: Fetches sessions with pre-calculated metrics.
      */
     @Query("""
@@ -85,6 +91,9 @@ interface VibeReaderDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWord(word: Word)
+
+    @Update
+    suspend fun updateWord(word: Word)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertQuote(quote: Quote)
@@ -184,4 +193,52 @@ interface VibeReaderDao {
      */
     @Query("SELECT display_name FROM sessions WHERE session_id = :sessionId")
     suspend fun getSessionDisplayName(sessionId: Long): String?
+
+    // --- Weekly Vibe Queries (time-range based) ---
+
+    /**
+     * Get words captured within a time range.
+     */
+    @Query("""
+        SELECT * FROM words
+        WHERE timestamp BETWEEN :startTime AND :endTime
+        ORDER BY timestamp DESC
+    """)
+    suspend fun getWordsInRange(startTime: Long, endTime: Long): List<Word>
+
+    /**
+     * Get quotes captured within a time range.
+     */
+    @Query("""
+        SELECT * FROM quotes
+        WHERE timestamp BETWEEN :startTime AND :endTime
+        ORDER BY timestamp DESC
+    """)
+    suspend fun getQuotesInRange(startTime: Long, endTime: Long): List<Quote>
+
+    /**
+     * Get completed sessions within a time range.
+     */
+    @Query("""
+        SELECT s.*, b.title as book_title,
+            (SELECT COUNT(*) FROM words WHERE session_id = s.session_id) as word_count,
+            (SELECT COUNT(*) FROM quotes WHERE session_id = s.session_id) as quote_count
+        FROM sessions s
+        JOIN books b ON s.book_id = b.book_id
+        WHERE s.start_time BETWEEN :startTime AND :endTime
+            AND s.status = 'inactive'
+        ORDER BY s.start_time DESC
+    """)
+    suspend fun getSessionsInRange(startTime: Long, endTime: Long): List<SessionWithMetrics>
+
+    /**
+     * Get distinct book titles from sessions in a time range.
+     */
+    @Query("""
+        SELECT DISTINCT b.title FROM sessions s
+        JOIN books b ON s.book_id = b.book_id
+        WHERE s.start_time BETWEEN :startTime AND :endTime
+            AND s.status = 'inactive'
+    """)
+    suspend fun getBookTitlesInRange(startTime: Long, endTime: Long): List<String>
 }

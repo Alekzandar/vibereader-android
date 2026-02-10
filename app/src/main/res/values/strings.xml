@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Vibe Reader</string>
+    <string name="tile_capture_label">Vibe Capture</string>
 </resources>
